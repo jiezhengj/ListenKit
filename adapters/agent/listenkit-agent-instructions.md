@@ -56,3 +56,15 @@ Those are dependency, maintenance, or debugging interfaces. If `yt-dlp`, `ffmpeg
 On Windows, the same rule applies to `.\cli\generate-markdown.ps1`; do not bypass it with lower-level `.ps1` commands during normal integrations.
 
 ListenKit stops at plain transcript Markdown and same-stem transcript JSON. Downstream summaries, learning notes, vocabulary lists, cards, or app-specific records are separate transformations after ListenKit output exists.
+
+If a downstream workflow has already selected explicit time ranges, export clips through the supported supplemental interface instead of calling `ffmpeg` directly:
+
+```bash
+cli/export-audio-slices.py \
+  --input <audio> \
+  --manifest <json> \
+  --output-dir <dir> \
+  --padding-seconds 0.15
+```
+
+Use `--allow-overlap` only when overlapping padded clips are intentional. The downstream workflow remains responsible for deciding what each time range means.

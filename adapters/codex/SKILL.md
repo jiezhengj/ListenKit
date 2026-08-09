@@ -19,9 +19,12 @@ For `--output work/name.md`, the wrapper writes both `work/name.md` and `work/na
 
 For URL input, the wrapper tries platform subtitles first. If subtitles are usable, it renders the transcript from subtitles and skips ASR, while still trying to import local audio for listening. If subtitles are unavailable, it falls back to imported audio plus ASR.
 
+When a downstream workflow has already selected explicit time ranges, use `cli/export-audio-slices.py --input <audio> --manifest <json> --output-dir <dir>` to export clips. ListenKit validates and exports ranges; the downstream workflow remains responsible for semantic grouping. Add `--allow-overlap` only when overlapping padded clips are intentional.
+
 ## Rules
 
 - Keep ListenKit output to transcript Markdown and the same-stem transcript JSON artifact.
+- Use `cli/export-audio-slices.py` instead of raw `ffmpeg` when a downstream workflow requests clips for explicit time ranges.
 - Leave ASR engine and device selection on their automatic defaults; do not force CPU unless the user explicitly requests reproducible CPU execution.
 - Do not expose existing-audio, existing-transcript-JSON, subtitle extraction, ASR, import, rendering, raw downloader, or `tools/*` workflows through this high-level skill; those belong to ListenKit debugging and maintenance only.
 - Do not add learning-note templates, Obsidian frontmatter, wikilinks, Anki cards, or review scheduling unless a downstream project explicitly asks.

@@ -19,6 +19,20 @@ The command also writes a same-stem transcript JSON file next to the Markdown
 output. External agents should consume that JSON instead of calling the lower
 levels directly.
 
+## Public Slice Export
+
+Downstream workflows that already own semantic grouping may call:
+
+```bash
+cli/export-audio-slices.py --input <audio> --manifest <json> --output-dir <dir>
+```
+
+This is a public supplemental interface, not a transcript-generation stage. It
+accepts explicit time ranges and does not infer sentences, dialogue groups, or
+application-specific metadata. By default it clips padding at neighboring
+boundaries; use `--allow-overlap` only when overlapping padded clips are
+intentional.
+
 ## Lower-Level CLI
 
 The following commands remain available for tests, maintenance, caching, and

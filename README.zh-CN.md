@@ -74,6 +74,7 @@ Windows 使用 `.\cli\install-agent-instructions.ps1` 的相同参数。若不�
 
 - 包含来源、语言、转写引擎、实际设备和正文的纯 Markdown
 - 包含标准化文本、分段、时间戳和硬件 fallback 诊断的同名 JSON
+- 下游已经选好时间段时，可通过 `cli/export-audio-slices.py` 导出音频片段
 
 ListenKit 不绑定 Codex，也不只支持日语。公开 CLI 支持 Japanese、English、Chinese 和 Korean 标签。它只负责获取媒体、优先提取平台字幕、执行本地 ASR 和规范化转写稿；笔记、摘要、单词卡和间隔复习属于下游应用。
 
@@ -84,7 +85,7 @@ ListenKit 不绑定 Codex，也不只支持日语。公开 CLI 支持 Japanese�
 - Claude：`adapters/claude/CLAUDE.md`
 - Cursor：`adapters/cursor/foreign-listening.md`
 
-正常集成只应调用 macOS / Linux / WSL 的 `cli/generate-markdown.sh`，或原生 Windows 的 `.\cli\generate-markdown.ps1`，不要重复实现下载、字幕选择、ASR 和渲染流程。
+正常集成只应调用 macOS / Linux / WSL 的 `cli/generate-markdown.sh`，或原生 Windows 的 `.\cli\generate-markdown.ps1`，不要重复实现下载、字幕选择、ASR 和渲染流程。若下游流程已经选好明确时间段，应调用 `cli/export-audio-slices.py`，而不是直接调用 `ffmpeg`。
 
 ## 隐私与版权
 

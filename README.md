@@ -89,6 +89,7 @@ Output:
 
 - Plain Markdown with source metadata and transcript text
 - Same-stem transcript JSON with normalized text, segments, engine metadata, locale, and timing status
+- Optional audio clips exported from a downstream time-range manifest through `cli/export-audio-slices.py`
 
 ## What It Is Not
 
@@ -104,7 +105,7 @@ Output:
 - Claude: `adapters/claude/CLAUDE.md`
 - Cursor: `adapters/cursor/foreign-listening.md`
 
-Adapters should call the public `cli/generate-markdown.sh` entrypoint for normal use, then consume either the generated Markdown or same-stem JSON. They should not reimplement import, subtitle extraction, transcription, rendering, or downstream note systems.
+Adapters should call the public `cli/generate-markdown.sh` entrypoint for normal use, then consume either the generated Markdown or same-stem JSON. When a downstream workflow has already selected time ranges, call `cli/export-audio-slices.py` instead of invoking `ffmpeg` directly. Adapters should not reimplement import, subtitle extraction, transcription, rendering, or downstream note systems.
 
 On Windows, adapters use `.\cli\generate-markdown.ps1` instead. Both entrypoints preserve the same parameters and output contract.
 
