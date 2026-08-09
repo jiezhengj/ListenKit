@@ -1,3 +1,4 @@
+import os
 import subprocess
 import tempfile
 import unittest
@@ -8,6 +9,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 INSTALL_SCRIPT = REPO_ROOT / "cli" / "install-agent-instructions.sh"
 
 
+@unittest.skipIf(os.name == "nt", "Bash wrapper compatibility is tested on Unix CI")
 class InstallAgentInstructionsTests(unittest.TestCase):
     def run_script(self, *args: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
         return subprocess.run(

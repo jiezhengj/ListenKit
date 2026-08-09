@@ -9,9 +9,12 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 INIT_SCRIPT = REPO_ROOT / "cli" / "init-faster-whisper.sh"
 CHECK_RUNTIME = REPO_ROOT / "cli" / "check-runtime.sh"
 REQUIREMENTS = REPO_ROOT / "requirements-faster-whisper.txt"
+CUDA_REQUIREMENTS = REPO_ROOT / "requirements-faster-whisper-cuda.txt"
+MLX_REQUIREMENTS = REPO_ROOT / "requirements-mlx-whisper.txt"
 PYTHON314 = Path("/opt/homebrew/bin/python3.14")
 
 
+@unittest.skipIf(os.name == "nt", "Bash wrapper compatibility is tested on Unix CI")
 class InitFasterWhisperTests(unittest.TestCase):
     def test_requirements_pin_only_direct_faster_whisper_dependency(self) -> None:
         requirements = [
@@ -28,6 +31,29 @@ class InitFasterWhisperTests(unittest.TestCase):
         self.assertIn("requirements-faster-whisper.txt", script)
         self.assertIn('-r "$requirements_file"', script)
         self.assertNotIn("pip install faster-whisper", script)
+
+    def test_managed_cuda_requirements_pin_supported_major_versions(self) -> None:
+        requirements = [
+            line.strip()
+            for line in CUDA_REQUIREMENTS.read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
+
+        self.assertEqual(
+            requirements,
+            ["nvidia-cublas-cu12>=12.4,<13", "nvidia-cudnn-cu12>=9,<10"],
+        )
+        script = INIT_SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("prepare_runtime_acceleration", script)
+
+    def test_managed_mlx_requirements_pin_verified_version(self) -> None:
+        requirements = [
+            line.strip()
+            for line in MLX_REQUIREMENTS.read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
+
+        self.assertEqual(requirements, ["mlx-whisper==0.4.3"])
 
     def test_default_runtime_is_local_cache_not_repo_venv(self) -> None:
         init_script = INIT_SCRIPT.read_text(encoding="utf-8")

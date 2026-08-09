@@ -11,7 +11,7 @@ Use this skill when the user wants ListenKit to produce transcript artifacts fro
 
 1. Confirm exactly one input source: URL or local media path.
 2. Choose the output Markdown path and user-facing language label.
-3. Run `cli/generate-markdown.sh` once with the matching input option.
+3. Run the platform public entrypoint once with the matching input option: `cli/generate-markdown.sh` on macOS/Linux/WSL or `.\cli\generate-markdown.ps1` on native Windows.
 
 The wrapper derives the ASR locale from `--language`. For URL input, it defaults the Markdown title to the video's platform title when available; for local input, it derives the title from the source filename. Use optional `--locale` or `--title` only when the user needs an override.
 
@@ -22,6 +22,7 @@ For URL input, the wrapper tries platform subtitles first. If subtitles are usab
 ## Rules
 
 - Keep ListenKit output to transcript Markdown and the same-stem transcript JSON artifact.
+- Leave ASR engine and device selection on their automatic defaults; do not force CPU unless the user explicitly requests reproducible CPU execution.
 - Do not expose existing-audio, existing-transcript-JSON, subtitle extraction, ASR, import, rendering, raw downloader, or `tools/*` workflows through this high-level skill; those belong to ListenKit debugging and maintenance only.
 - Do not add learning-note templates, Obsidian frontmatter, wikilinks, Anki cards, or review scheduling unless a downstream project explicitly asks.
 - Keep language-learning analysis outside this generic transcription skill.
@@ -46,5 +47,15 @@ cli/generate-markdown.sh \
   --input ~/Desktop/recording.wav \
   --language English \
   --output work/recording-transcript.md \
+  --auto-init
+```
+
+Native Windows uses the same options with PowerShell syntax:
+
+```powershell
+.\cli\generate-markdown.ps1 `
+  --input "C:\Media\recording.wav" `
+  --language English `
+  --output work\recording-transcript.md `
   --auto-init
 ```

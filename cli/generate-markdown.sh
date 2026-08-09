@@ -17,8 +17,8 @@ Optional overrides:
   --locale <bcp47>               Optional ASR locale override. Defaults from --language
 
 ASR options:
-  --engine <name>                ASR backend. Defaults to faster-whisper
-  --auto-init                    Allow faster-whisper initialization when needed
+  --engine <name>                auto, faster-whisper, mlx, or apple. Defaults to auto
+  --auto-init                    Allow managed ASR runtime initialization when needed
 
 Import options:
   --format <mp3|m4a|wav|flac>    Imported audio format. Defaults to m4a
@@ -43,7 +43,7 @@ title=""
 language=""
 output_path=""
 locale=""
-engine="faster-whisper"
+engine="auto"
 auto_init="false"
 audio_format="m4a"
 audio_quality="0"

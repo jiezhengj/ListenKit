@@ -7,7 +7,8 @@ Usage:
   cli/init-faster-whisper.sh
 
 Create or reuse ListenKit's local Cache runtime, install faster-whisper,
-verify that it can be imported, and print the Python executable path.
+prepare supported CUDA or MLX acceleration, verify runtime health, and print
+the Python executable path.
 EOF
 }
 
@@ -31,6 +32,13 @@ venv_dir="${LISTENKIT_FASTER_WHISPER_VENV_DIR:-${HOME}/Library/Caches/ListenKit/
 python_executable="$venv_dir/bin/python"
 requirements_file="$repo_root/requirements-faster-whisper.txt"
 import_timeout_seconds="${LISTENKIT_FASTER_WHISPER_IMPORT_TIMEOUT_SECONDS:-60}"
+
+prepare_acceleration() {
+  local candidate="$1"
+  PYTHONPATH="$repo_root${PYTHONPATH:+:$PYTHONPATH}" \
+    "$candidate" -c \
+    'import pathlib; from listenkit_cli.runtime import prepare_runtime_acceleration; prepare_runtime_acceleration(pathlib.Path(__import__("sys").executable))'
+}
 
 if [[ ! "$import_timeout_seconds" =~ ^[1-9][0-9]*$ ]]; then
   echo "LISTENKIT_FASTER_WHISPER_IMPORT_TIMEOUT_SECONDS must be a positive integer." >&2
@@ -123,6 +131,7 @@ fi
 
 if [[ -x "$python_executable" ]]; then
   if python_can_import_faster_whisper "$python_executable" && python_has_expected_faster_whisper_version "$python_executable"; then
+    prepare_acceleration "$python_executable"
     printf '%s\n' "$python_executable"
     exit 0
   else
@@ -148,7 +157,7 @@ fi
 "$python_executable" -m pip install -r "$requirements_file" >&2
 
 if python_can_import_faster_whisper "$python_executable" && python_has_expected_faster_whisper_version "$python_executable"; then
-  :
+  prepare_acceleration "$python_executable"
 else
   import_status=$?
   if [[ "$import_status" -eq 124 ]]; then

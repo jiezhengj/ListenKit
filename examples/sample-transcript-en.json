@@ -1,5 +1,10 @@
 {
+  "schema_version": 1,
   "engine": "faster-whisper",
+  "model": "small",
+  "device": "cpu",
+  "device_index": 0,
+  "compute_type": "int8",
   "locale": "en-US",
   "language": "English",
   "full_text": "Today I want to talk about a small library near my office. It is quiet in the morning, so I often stop there before work. If you need a place to focus, it is a good option.",

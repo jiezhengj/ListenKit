@@ -173,6 +173,28 @@ class RenderListeningNoteTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_renders_acceleration_metadata_and_fallback_reason(self) -> None:
+        result = self.run_payload(
+            {
+                "schema_version": 1,
+                "engine": "faster-whisper",
+                "locale": "en-US",
+                "device": "cpu",
+                "compute_type": "int8",
+                "fallback_reason": "CUDA runtime unavailable",
+                "full_text": "fallback recorded",
+                "segments": [],
+                "timing_complete": True,
+            }
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        output = Path(result.stdout.strip())
+        rendered = output.read_text(encoding="utf-8")
+        self.assertIn("ASR device: `cpu`", rendered)
+        self.assertIn("Compute type: `int8`", rendered)
+        self.assertIn("Acceleration fallback: CUDA runtime unavailable", rendered)
+
     def test_accepts_legacy_payload_without_schema_version(self) -> None:
         result = self.run_payload(
             {

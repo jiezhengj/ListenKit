@@ -4,23 +4,29 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage:
-  cli/transcribe-audio.sh --audio-path <path> --locale <bcp47> [--engine faster-whisper|apple] [--output <json>] [--auto-init]
+  cli/transcribe-audio.sh --audio-path <path> --locale <bcp47> [--engine auto|faster-whisper|mlx|apple] [--output <json>] [--auto-init] [--device auto|cpu|cuda]
 
 Options:
   --audio-path <path>      Local audio file to transcribe
   --locale <bcp47>         Speech locale, for example ja-JP or en-US
-  --engine <name>          ASR backend. Defaults to faster-whisper
+  --engine <name>          auto, faster-whisper, mlx, or apple. Defaults to auto
   --output <json>          Optional output JSON path
-  --auto-init              Allow ListenKit to create its local Cache runtime and install faster-whisper when missing
+  --auto-init              Allow ListenKit to create and prepare its managed local ASR runtime
+  --device <name>          auto, cpu, or cuda. Defaults to auto
+  --compute-type <name>    CTranslate2 compute type. Defaults to auto
+  --device-index <index>   Preferred CUDA device index
   --help                   Show this help
 EOF
 }
 
 audio_path=""
 locale=""
-engine="faster-whisper"
+engine="auto"
 output_path=""
 auto_init="false"
+device="auto"
+compute_type="auto"
+device_index=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -48,6 +54,21 @@ while [[ $# -gt 0 ]]; do
       auto_init="true"
       shift
       ;;
+    --device)
+      [[ $# -ge 2 ]] || { echo "Missing value for --device" >&2; exit 1; }
+      device="$2"
+      shift 2
+      ;;
+    --compute-type)
+      [[ $# -ge 2 ]] || { echo "Missing value for --compute-type" >&2; exit 1; }
+      compute_type="$2"
+      shift 2
+      ;;
+    --device-index)
+      [[ $# -ge 2 ]] || { echo "Missing value for --device-index" >&2; exit 1; }
+      device_index="$2"
+      shift 2
+      ;;
     --help|-h)
       usage
       exit 0
@@ -66,9 +87,9 @@ if [[ -z "$audio_path" || -z "$locale" ]]; then
   exit 1
 fi
 
-if [[ "$engine" != "faster-whisper" && "$engine" != "apple" ]]; then
+if [[ "$engine" != "auto" && "$engine" != "faster-whisper" && "$engine" != "mlx" && "$engine" != "apple" ]]; then
   echo "Unsupported engine: $engine" >&2
-  echo "Supported engines: faster-whisper, apple." >&2
+  echo "Supported engines: auto, faster-whisper, mlx, apple." >&2
   exit 1
 fi
 
@@ -313,8 +334,23 @@ fi
 
 enable_offline_hf_if_cached
 
-run_and_write "$python_executable" "$helper" "$audio_path" \
-  --locale "$locale" \
-  --model "$faster_whisper_model" \
-  --compute-type int8 \
-  --beam-size 5
+core_command=(
+  "$python_executable" -m listenkit_cli transcribe-audio
+  --audio-path "$audio_path"
+  --locale "$locale"
+  --engine "$engine"
+  --device "$device"
+  --compute-type "$compute_type"
+)
+if [[ -n "$device_index" ]]; then
+  core_command+=(--device-index "$device_index")
+fi
+if [[ "$auto_init" == "true" || "${LISTENKIT_AUTO_INIT:-}" == "1" ]]; then
+  core_command+=(--auto-init)
+fi
+
+export PYTHONPATH="$repo_root${PYTHONPATH:+:$PYTHONPATH}"
+if [[ -z "${FASTER_WHISPER_PYTHON:-}" ]]; then
+  export LISTENKIT_FASTER_WHISPER_VENV_PYTHON="$python_executable"
+fi
+run_and_write "${core_command[@]}"

@@ -6,6 +6,8 @@
 - Language: Japanese
 - Locale: `ja-JP`
 - Transcript engine: `faster-whisper`
+- ASR device: `cpu`
+- Compute type: `int8`
 - Timing complete: yes
 - Generated at: 2026-05-02T00:38:10+00:00
 

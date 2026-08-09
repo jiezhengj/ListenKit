@@ -1,0 +1,3 @@
+# Installed automatically only when ListenKit detects an NVIDIA GPU on Windows or Linux.
+nvidia-cublas-cu12>=12.4,<13
+nvidia-cudnn-cu12>=9,<10

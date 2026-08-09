@@ -10,6 +10,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 EXTRACT_SCRIPT = REPO_ROOT / "cli" / "extract-subtitles.sh"
 
 
+@unittest.skipIf(os.name == "nt", "Bash wrapper compatibility is tested on Unix CI")
 class ExtractSubtitlesTests(unittest.TestCase):
     def run_extract(self, tmpdir: Path, ytdlp_script: str) -> subprocess.CompletedProcess[str]:
         bin_dir = tmpdir / "bin"

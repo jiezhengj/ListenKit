@@ -1,0 +1,2 @@
+# Installed automatically only on Apple Silicon macOS.
+mlx-whisper==0.4.3

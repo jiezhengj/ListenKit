@@ -1,0 +1,49 @@
+name: test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  unit:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Compile Python sources
+        run: python -m compileall -q listenkit_cli cli tools
+      - name: Run test suite
+        run: python -m unittest discover -s tests -v
+      - name: Verify Windows PowerShell 5.1 public entrypoint
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: .\cli\generate-markdown.ps1 --help
+      - name: Verify PowerShell 7 public entrypoint
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: .\cli\generate-markdown.ps1 --help
+
+  windows-real-runtime:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Initialize and check real faster-whisper runtime
+        shell: powershell
+        run: |
+          $env:LISTENKIT_FASTER_WHISPER_BOOTSTRAP_PYTHON = (Get-Command python).Source
+          $env:LISTENKIT_FASTER_WHISPER_VENV_DIR = Join-Path $env:RUNNER_TEMP "ListenKit-runtime"
+          .\cli\init-faster-whisper.ps1
+          .\cli\check-runtime.ps1
+          .\cli\doctor.ps1
+          & (Join-Path $env:LISTENKIT_FASTER_WHISPER_VENV_DIR "Scripts\python.exe") tools\faster-whisper\transcribe.py "$env:RUNNER_TEMP\missing.wav"
+          if ($LASTEXITCODE -eq 0) { throw "Missing-audio helper check should fail with a schema error payload." }
+          exit 0

@@ -1,5 +1,10 @@
 {
+  "schema_version": 1,
   "engine": "faster-whisper",
+  "model": "small",
+  "device": "cpu",
+  "device_index": 0,
+  "compute_type": "int8",
   "locale": "ja-JP",
   "language": "Japanese",
   "full_text": "今日は駅の近くにある小さな喫茶店について話します。朝は人が少ないので、ゆっくり本を読むことができます。店員さんも親切で、初めて行く人でも入りやすい雰囲気です。",

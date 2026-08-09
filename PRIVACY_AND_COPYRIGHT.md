@@ -2,7 +2,10 @@
 
 ## Local Processing
 
-The default ASR route uses `faster-whisper` for local inference. Audio transcription happens on your machine, but the first run may download model files unless they are already cached locally.
+The default ASR route performs local inference with MLX Whisper on a ready
+Apple Silicon Mac and faster-whisper elsewhere. Audio transcription happens on
+your machine, but the first run may download runtime dependencies and model
+files unless they are already cached locally.
 
 Apple Speech is an optional local backend on macOS. When the Apple helper is used, audio transcription also happens on the local Mac.
 

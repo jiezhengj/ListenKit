@@ -10,6 +10,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 IMPORT_SCRIPT = REPO_ROOT / "cli" / "import-audio.sh"
 
 
+@unittest.skipIf(os.name == "nt", "Bash wrapper compatibility is tested on Unix CI")
 class ImportAudioTests(unittest.TestCase):
     def test_local_input_invokes_ffmpeg_and_returns_output_path(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

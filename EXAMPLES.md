@@ -33,4 +33,8 @@ Every rendered Markdown file contains:
 - `Source`
 - `Transcript`
 
+The current schema-v1 fixtures also demonstrate actual ASR device and compute
+metadata. These particular synthetic examples use `cpu` + `int8`; real output
+records the backend and accelerator that actually executed.
+
 The renderer does not add learning-analysis sections. Downstream projects can build their own note templates from the transcript JSON or Markdown.

@@ -87,6 +87,14 @@ def render(args: argparse.Namespace, payload: dict[str, Any]) -> str:
     generated_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
     transcript = transcript_from_payload(payload)
     timing_note = "yes" if payload.get("timing_complete") else "partial or unavailable"
+    runtime_lines = []
+    if payload.get("device"):
+        runtime_lines.append(f"- ASR device: `{payload['device']}`")
+    if payload.get("compute_type"):
+        runtime_lines.append(f"- Compute type: `{payload['compute_type']}`")
+    if payload.get("fallback_reason"):
+        fallback_reason = clean_text(str(payload["fallback_reason"])).replace("\n", " ")
+        runtime_lines.append(f"- Acceleration fallback: {fallback_reason}")
 
     return "\n".join(
         [
@@ -98,6 +106,7 @@ def render(args: argparse.Namespace, payload: dict[str, Any]) -> str:
             f"- Language: {args.language}",
             f"- Locale: `{payload.get('locale')}`",
             f"- Transcript engine: `{payload.get('engine')}`",
+            *runtime_lines,
             f"- Timing complete: {timing_note}",
             f"- Generated at: {generated_at}",
             "",
