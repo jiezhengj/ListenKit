@@ -30,9 +30,18 @@ from listenkit_cli.platform_paths import (
     huggingface_hub_cache_dir,
     runtime_python_path,
 )
-from listenkit_cli.process import run_command
+from listenkit_cli.process import (
+    find_command,
+    isolated_python_environment,
+    run_command,
+)
 from listenkit_cli.rendering import render_transcript
-from listenkit_cli.runtime import prepare_runtime_acceleration
+from listenkit_cli.runtime import (
+    PythonCommand,
+    _candidate_commands,
+    _command_is_python314,
+    prepare_runtime_acceleration,
+)
 from listenkit_cli.subtitles import extract_subtitles, parse_vtt
 from listenkit_cli.transcription import transcribe_audio
 from listenkit_cli.workflow import generate_markdown, locale_from_language
@@ -89,6 +98,79 @@ class PlatformPathTests(unittest.TestCase):
 
 
 class HealthContractTests(unittest.TestCase):
+    def test_windows_command_fallbacks_cover_system32_and_winget_links(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            system_root = root / "Windows"
+            local_app_data = root / "Local"
+            system32 = system_root / "System32"
+            winget_links = local_app_data / "Microsoft" / "WinGet" / "Links"
+            system32.mkdir(parents=True)
+            winget_links.mkdir(parents=True)
+            expected = {
+                "nvidia-smi": system32 / "nvidia-smi.exe",
+                "ffmpeg": winget_links / "ffmpeg.exe",
+                "ffprobe": winget_links / "ffprobe.exe",
+                "yt-dlp": winget_links / "yt-dlp.exe",
+            }
+            for path in expected.values():
+                path.write_bytes(b"executable")
+            environment = {
+                "PATH": "",
+                "SystemRoot": str(system_root),
+                "LOCALAPPDATA": str(local_app_data),
+            }
+            for name, path in expected.items():
+                with self.subTest(name=name):
+                    self.assertEqual(
+                        find_command(
+                            name,
+                            environment=environment,
+                            platform="win32",
+                        ),
+                        str(path),
+                    )
+
+    def test_windows_python314_bootstrap_candidates_include_common_installs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            local_app_data = root / "Local App Data"
+            program_files = root / "Program Files"
+            candidates = _candidate_commands(
+                platform="win32",
+                environment={
+                    "LOCALAPPDATA": str(local_app_data),
+                    "ProgramFiles": str(program_files),
+                },
+            )
+        self.assertEqual(
+            candidates[:2],
+            [
+                PythonCommand(
+                    str(
+                        local_app_data
+                        / "Programs"
+                        / "Python"
+                        / "Python314"
+                        / "python.exe"
+                    )
+                ),
+                PythonCommand(str(program_files / "Python314" / "python.exe")),
+            ],
+        )
+
+    def test_unexecutable_python314_candidate_is_skipped(self) -> None:
+        with mock.patch(
+            "listenkit_cli.runtime.subprocess.run",
+            side_effect=OSError("store alias cannot execute"),
+        ):
+            self.assertFalse(
+                _command_is_python314(
+                    PythonCommand("python.exe"),
+                    environment={"PATH": ""},
+                )
+            )
+
     def test_import_timeout_is_positive_integer(self) -> None:
         self.assertEqual(import_timeout_seconds({}), 60)
         self.assertEqual(
@@ -108,6 +190,20 @@ class HealthContractTests(unittest.TestCase):
             [sys.executable, "-c", "import sys; print(sys.argv[1])", "路径 with spaces"]
         )
         self.assertEqual(result.stdout.strip(), "路径 with spaces")
+
+    def test_isolated_python_environment_removes_agent_python_overrides(self) -> None:
+        isolated = isolated_python_environment(
+            {
+                "PATH": "tools",
+                "PYTHONHOME": "/agent/python",
+                "PYTHONPATH": "/agent/packages",
+            }
+        )
+        self.assertNotIn("PYTHONHOME", isolated)
+        self.assertNotIn("PYTHONPATH", isolated)
+        self.assertEqual(isolated["PATH"], "tools")
+        self.assertEqual(isolated["PYTHONUTF8"], "1")
+        self.assertEqual(isolated["PYTHONIOENCODING"], "utf-8")
 
     def test_faster_whisper_import_is_bounded(self) -> None:
         if sys.version_info[:2] < (3, 10):
@@ -136,6 +232,21 @@ class HealthContractTests(unittest.TestCase):
                     },
                 )
             self.assertLess(time.monotonic() - started, 5)
+
+    def test_apple_backend_is_rejected_outside_macos(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            audio = Path(tmpdir) / "sample.wav"
+            audio.write_bytes(b"fake")
+            for simulated_platform in ("windows", "linux"):
+                with self.subTest(platform=simulated_platform), mock.patch(
+                    "listenkit_cli.transcription.platform_id",
+                    return_value=simulated_platform,
+                ), self.assertRaisesRegex(ListenKitError, "only on macOS"):
+                    transcribe_audio(
+                        audio_path=audio,
+                        locale="en-US",
+                        engine="apple",
+                    )
 
 
 class AccelerationPreparationTests(unittest.TestCase):

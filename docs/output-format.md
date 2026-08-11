@@ -49,3 +49,40 @@ engine, device, and compute metadata. If automatic MLX selection is unavailable,
 the resulting faster-whisper engine/device values make the executed fallback
 path visible; CUDA attempt failures additionally use `fallback_from` and
 `fallback_reason`.
+
+## Execution Report JSON
+
+`generate-markdown` and `transcribe-audio` accept `--report-json <path>`. The
+execution report is a separate, atomic status artifact; it does not replace the
+same-stem transcript JSON and intentionally omits full transcript text.
+
+Successful example:
+
+```json
+{
+  "schema_version": 1,
+  "listenkit_version": "1.0.0",
+  "command": "generate-markdown",
+  "status": "ok",
+  "started_at": "2026-08-10T10:00:00Z",
+  "finished_at": "2026-08-10T10:00:08Z",
+  "duration_seconds": 8.0,
+  "outputs": {
+    "markdown": "work/sample.md",
+    "transcript_json": "work/sample.json"
+  },
+  "transcription": {
+    "schema_version": 1,
+    "engine": "mlx-whisper",
+    "device": "metal",
+    "compute_type": "float16",
+    "locale": "en-US",
+    "timing_complete": true
+  }
+}
+```
+
+On failure, `status` is `error` and an `error` object contains the exception
+type and message. The report path must differ from both Markdown and transcript
+JSON paths. Callers should treat unknown execution-report schema versions as
+unsupported instead of guessing their meaning.

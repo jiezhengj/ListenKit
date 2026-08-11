@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,7 +9,7 @@ from typing import Mapping
 
 from .errors import CommandExecutionError, ListenKitError
 from .platform_paths import platform_id
-from .process import run_command
+from .process import find_command, run_command
 
 CUDA_LIBRARY_DIRS_CODE = r"""
 import json
@@ -40,7 +39,7 @@ def nvidia_driver_available(
     environment: Mapping[str, str] | None = None,
 ) -> bool:
     env = os.environ if environment is None else environment
-    executable = shutil.which("nvidia-smi", path=env.get("PATH", ""))
+    executable = find_command("nvidia-smi", environment=env)
     if not executable:
         return False
     try:
@@ -69,6 +68,7 @@ def cuda_library_dirs(
             environment=env,
             timeout=20,
             check=False,
+            isolate_python=True,
         )
     except ListenKitError:
         return ()
@@ -127,6 +127,7 @@ def install_managed_cuda_dependencies(
         [python_executable, "-m", "pip", "install", "-r", requirements],
         environment=env,
         check=False,
+        isolate_python=True,
     )
     if result.stdout:
         print(result.stdout.rstrip(), file=sys.stderr)

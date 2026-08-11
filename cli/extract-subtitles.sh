@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd "$script_dir/.." && pwd)"
+# shellcheck source=cli/_common.sh
+source "$script_dir/_common.sh"
+listenkit_prepare_posix_environment
+
 usage() {
   cat <<'EOF'
 Usage:
@@ -59,9 +65,8 @@ if ! command -v yt-dlp >/dev/null 2>&1; then
   exit 1
 fi
 
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-repo_root="$(cd "$script_dir/.." && pwd)"
 converter="$repo_root/tools/subtitles/vtt_to_transcript_json.py"
+cli_python="$(listenkit_find_cli_python)"
 sub_lang="${locale%%-*}"
 sub_lang="$(printf '%s' "$sub_lang" | tr '[:upper:]' '[:lower:]')"
 work_dir="$(mktemp -d)"
@@ -92,7 +97,7 @@ download_subtitles() {
   subtitle_path="$(find_vtt)"
   [[ -n "$subtitle_path" ]] || return 1
 
-  python3 "$converter" \
+  "$cli_python" "$converter" \
     --vtt "$subtitle_path" \
     --locale "$locale" \
     --subtitle-kind "$kind" \

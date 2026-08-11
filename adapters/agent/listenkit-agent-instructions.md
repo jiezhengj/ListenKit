@@ -4,17 +4,22 @@ Use ListenKit only through the public high-level transcript command during norma
 
 Choose the entrypoint from the current operating environment:
 
-- macOS/Linux/WSL: `cli/generate-markdown.sh`
-- native Windows: `.\cli\generate-markdown.ps1`
+- any platform with a compatible repository-root Python: `python -m listenkit_cli generate-markdown`
+- macOS/Linux/WSL dispatcher: `cli/listenkit.sh generate-markdown`
+- native Windows dispatcher: `.\cli\listenkit.ps1 generate-markdown`
 
-Do not send native Windows through WSL; it has a different filesystem and ASR runtime.
+The existing `cli/generate-markdown.sh` and `.\cli\generate-markdown.ps1`
+convenience wrappers remain supported. Do not send native Windows through WSL;
+Git Bash is not WSL, and WSL has a different filesystem and ASR runtime. The
+`.sh` entrypoints intentionally exit 64 in Git Bash/MSYS2/Cygwin; use the Python
+or PowerShell dispatcher there.
 
 ## Normal Workflow
 
 For a URL:
 
 ```bash
-cli/generate-markdown.sh \
+cli/listenkit.sh generate-markdown \
   --url "<url>" \
   --language <label> \
   --output <md> \
@@ -24,7 +29,7 @@ cli/generate-markdown.sh \
 For a local audio or video file:
 
 ```bash
-cli/generate-markdown.sh \
+cli/listenkit.sh generate-markdown \
   --input <path> \
   --language <label> \
   --output <md> \
@@ -39,6 +44,15 @@ Rules:
 - Leave `--engine` and `--device` on their automatic defaults; do not force CPU
   unless the user requests reproducible CPU execution.
 - For `--output path/name.md`, expect both `path/name.md` and `path/name.json`.
+- For automation, add `--report-json path/name.execution.json` and read that
+  file for status, artifact paths, actual backend metadata, and errors.
+- Do not patch this repository to compensate for a host Agent's PATH, shell, or
+  stdout-capture limitation. Use the Python/platform dispatcher and report file.
+- On Windows, set `LISTENKIT_CLI_PYTHON` only when automatic discovery cannot
+  use the managed runtime or standard Python 3.14 install locations. The CLI
+  host accepts Python 3.10+; ASR runtime creation remains pinned to Python 3.14.
+- Entry points are non-interactive by default. Use `--auto-init` to authorize
+  runtime preparation; never wait on an implicit terminal prompt.
 - If the user does not specify an output path, prefer `work/<safe-source-stem>-transcript.md`; if no stable source stem is available, use `work/transcript.md`.
 
 Do not call these directly as an integration shortcut:

@@ -11,7 +11,11 @@ Use this skill when the user wants ListenKit to produce transcript artifacts fro
 
 1. Confirm exactly one input source: URL or local media path.
 2. Choose the output Markdown path and user-facing language label.
-3. Run the platform public entrypoint once with the matching input option: `cli/generate-markdown.sh` on macOS/Linux/WSL or `.\cli\generate-markdown.ps1` on native Windows.
+3. Run the shared programmatic entrypoint once: `python -m listenkit_cli generate-markdown` from the repository root. If the host Python environment is uncertain, use `cli/listenkit.sh generate-markdown` on macOS/Linux/WSL or `.\cli\listenkit.ps1 generate-markdown` on native Windows.
+
+Git Bash, MSYS2, and Cygwin are native Windows rather than WSL. The `.sh`
+entrypoints exit 64 there; use the Python or PowerShell dispatcher and consume
+`--report-json` when stdout capture is unreliable.
 
 The wrapper derives the ASR locale from `--language`. For URL input, it defaults the Markdown title to the video's platform title when available; for local input, it derives the title from the source filename. Use optional `--locale` or `--title` only when the user needs an override.
 
@@ -36,29 +40,32 @@ When a downstream workflow has already selected explicit time ranges, use `cli/e
 URL input:
 
 ```bash
-cli/generate-markdown.sh \
+cli/listenkit.sh generate-markdown \
   --url "https://example.com/video" \
   --language Japanese \
   --output work/sample-transcript.md \
+  --report-json work/sample-execution.json \
   --auto-init
 ```
 
 Local media input:
 
 ```bash
-cli/generate-markdown.sh \
+cli/listenkit.sh generate-markdown \
   --input ~/Desktop/recording.wav \
   --language English \
   --output work/recording-transcript.md \
+  --report-json work/recording-execution.json \
   --auto-init
 ```
 
 Native Windows uses the same options with PowerShell syntax:
 
 ```powershell
-.\cli\generate-markdown.ps1 `
+.\cli\listenkit.ps1 generate-markdown `
   --input "C:\Media\recording.wav" `
   --language English `
   --output work\recording-transcript.md `
+  --report-json work\recording-execution.json `
   --auto-init
 ```

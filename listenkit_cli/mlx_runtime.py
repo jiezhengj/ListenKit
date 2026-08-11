@@ -70,6 +70,7 @@ def probe_mlx_runtime(
             environment=env,
             timeout=MLX_PROBE_TIMEOUT_SECONDS,
             check=False,
+            isolate_python=True,
         )
     except CommandExecutionError as exc:
         return MlxProbe(False, error=str(exc))
@@ -110,6 +111,7 @@ def install_managed_mlx_dependencies(
         [python_executable, "-m", "pip", "install", "-r", requirements],
         environment=env,
         check=False,
+        isolate_python=True,
     )
     if result.stdout:
         print(result.stdout.rstrip(), file=sys.stderr)

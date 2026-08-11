@@ -13,6 +13,8 @@ INIT_SCRIPT = REPO_ROOT / "cli" / "init-faster-whisper.ps1"
 CHECK_SCRIPT = REPO_ROOT / "cli" / "check-runtime.ps1"
 GENERATE_SCRIPT = REPO_ROOT / "cli" / "generate-markdown.ps1"
 DOCTOR_SCRIPT = REPO_ROOT / "cli" / "doctor.ps1"
+LISTENKIT_SCRIPT = REPO_ROOT / "cli" / "listenkit.ps1"
+POSIX_LISTENKIT_SCRIPT = REPO_ROOT / "cli" / "listenkit.sh"
 
 
 def powershell_hosts() -> list[str]:
@@ -47,6 +49,154 @@ class WindowsRuntimeTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertIn("--language", result.stdout)
                 self.assertIn("--output", result.stdout)
+
+    @unittest.skipUnless(os.name == "nt", "requires Windows")
+    def test_dispatcher_sanitizes_polluted_python_environment_before_probe(self) -> None:
+        environment = os.environ.copy()
+        environment["LISTENKIT_CLI_PYTHON"] = sys.executable
+        environment["PYTHONHOME"] = r"C:\definitely-missing-python-home"
+        environment["PYTHONPATH"] = r"C:\definitely-missing-python-path"
+        for host in powershell_hosts():
+            with self.subTest(host=host):
+                result = subprocess.run(
+                    [
+                        host,
+                        "-NoProfile",
+                        "-ExecutionPolicy",
+                        "Bypass",
+                        "-File",
+                        str(LISTENKIT_SCRIPT),
+                        "--help",
+                    ],
+                    check=False,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    encoding="utf-8",
+                    env=environment,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("generate-markdown", result.stdout)
+                self.assertNotIn("Failed to import encodings", result.stderr)
+
+    @unittest.skipUnless(os.name == "nt", "requires Windows")
+    def test_dispatcher_finds_managed_python_with_restricted_path(self) -> None:
+        if sys.version_info[:2] < (3, 10):
+            self.skipTest("requires venv-capable Python")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            managed = Path(tmpdir) / "managed runtime with 空格"
+            subprocess.run(
+                [sys.executable, "-m", "venv", str(managed)],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            for host in powershell_hosts():
+                host_path = Path(shutil.which(host) or host)
+                environment = os.environ.copy()
+                environment.pop("LISTENKIT_CLI_PYTHON", None)
+                environment["LISTENKIT_FASTER_WHISPER_VENV_DIR"] = str(managed)
+                environment["PYTHONHOME"] = r"C:\definitely-missing-python-home"
+                environment["PYTHONPATH"] = r"C:\definitely-missing-python-path"
+                environment["PATH"] = str(host_path.parent)
+                with self.subTest(host=host):
+                    result = subprocess.run(
+                        [
+                            str(host_path),
+                            "-NoProfile",
+                            "-ExecutionPolicy",
+                            "Bypass",
+                            "-File",
+                            str(LISTENKIT_SCRIPT),
+                            "--help",
+                        ],
+                        check=False,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        encoding="utf-8",
+                        env=environment,
+                    )
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertIn("generate-markdown", result.stdout)
+
+    @unittest.skipUnless(os.name == "nt", "requires Windows")
+    def test_direct_module_and_powershell_errors_are_utf8(self) -> None:
+        missing = REPO_ROOT / "不存在" / "日本語😀.wav"
+        base_environment = os.environ.copy()
+        base_environment.pop("PYTHONUTF8", None)
+        base_environment.pop("PYTHONIOENCODING", None)
+        direct = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "listenkit_cli",
+                "transcribe-audio",
+                "--audio-path",
+                str(missing),
+                "--locale",
+                "ja-JP",
+            ],
+            cwd=REPO_ROOT,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=base_environment,
+        )
+        self.assertNotEqual(direct.returncode, 0)
+        self.assertIn(str(missing), direct.stderr.decode("utf-8", errors="strict"))
+
+        powershell_environment = base_environment.copy()
+        powershell_environment["LISTENKIT_CLI_PYTHON"] = sys.executable
+        for host in powershell_hosts():
+            with self.subTest(host=host):
+                result = subprocess.run(
+                    [
+                        host,
+                        "-NoProfile",
+                        "-ExecutionPolicy",
+                        "Bypass",
+                        "-File",
+                        str(LISTENKIT_SCRIPT),
+                        "transcribe-audio",
+                        "--audio-path",
+                        str(missing),
+                        "--locale",
+                        "ja-JP",
+                    ],
+                    check=False,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    env=powershell_environment,
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(
+                    str(missing),
+                    result.stderr.decode("utf-8", errors="strict"),
+                )
+
+    @unittest.skipUnless(os.name == "nt", "requires Windows")
+    def test_git_bash_posix_entrypoint_fails_fast(self) -> None:
+        candidates = (
+            Path(r"C:\Program Files\Git\bin\bash.exe"),
+            Path(r"C:\Program Files\Git\usr\bin\bash.exe"),
+        )
+        git_bash = next((path for path in candidates if path.is_file()), None)
+        if git_bash is None:
+            self.skipTest("Git for Windows bash is unavailable")
+        result = subprocess.run(
+            [str(git_bash), str(POSIX_LISTENKIT_SCRIPT), "--help"],
+            cwd=REPO_ROOT,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+        )
+        self.assertEqual(result.returncode, 64)
+        self.assertIn("not supported", result.stderr)
+        self.assertIn("python -m listenkit_cli", result.stderr)
+        self.assertIn("listenkit.ps1", result.stderr)
 
     @unittest.skipUnless(os.name == "nt", "requires Windows")
     def test_all_powershell_hosts_resolve_the_same_default_runtime(self) -> None:

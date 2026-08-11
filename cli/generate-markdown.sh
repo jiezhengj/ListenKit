@@ -1,6 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd "$script_dir/.." && pwd)"
+# shellcheck source=cli/_common.sh
+source "$script_dir/_common.sh"
+listenkit_prepare_posix_environment
+
+for argument in "$@"; do
+  case "$argument" in
+    --report-json|--report-json=*)
+      exec "$script_dir/listenkit.sh" generate-markdown "$@"
+      ;;
+  esac
+done
+
 usage() {
   cat <<'EOF'
 Usage:
@@ -19,6 +33,9 @@ Optional overrides:
 ASR options:
   --engine <name>                auto, faster-whisper, mlx, or apple. Defaults to auto
   --auto-init                    Allow managed ASR runtime initialization when needed
+  --device <name>                auto, cpu, or cuda. Defaults to auto
+  --compute-type <name>          CTranslate2 compute type. Defaults to auto
+  --device-index <index>         Preferred CUDA device index
 
 Import options:
   --format <mp3|m4a|wav|flac>    Imported audio format. Defaults to m4a
@@ -30,6 +47,7 @@ URL-only advanced options:
   --write-thumbnail              URL-only: save yt-dlp thumbnail next to URL audio
 
 Other:
+  --report-json <path>           Write a machine-readable execution report through the shared Python core
   --help                         Show this help
 
 This is the recommended high-level entrypoint. Existing audio and existing
@@ -45,6 +63,9 @@ output_path=""
 locale=""
 engine="auto"
 auto_init="false"
+device="auto"
+compute_type="auto"
+device_index=""
 audio_format="m4a"
 audio_quality="0"
 quality_was_set="false"
@@ -153,6 +174,21 @@ while [[ $# -gt 0 ]]; do
       auto_init="true"
       shift
       ;;
+    --device)
+      [[ $# -ge 2 ]] || { echo "Missing value for --device" >&2; exit 1; }
+      device="$2"
+      shift 2
+      ;;
+    --compute-type)
+      [[ $# -ge 2 ]] || { echo "Missing value for --compute-type" >&2; exit 1; }
+      compute_type="$2"
+      shift 2
+      ;;
+    --device-index)
+      [[ $# -ge 2 ]] || { echo "Missing value for --device-index" >&2; exit 1; }
+      device_index="$2"
+      shift 2
+      ;;
     --format)
       [[ $# -ge 2 ]] || { echo "Missing value for --format" >&2; exit 1; }
       audio_format="$2"
@@ -231,12 +267,11 @@ if [[ -z "$locale" ]]; then
   fi
 fi
 
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-repo_root="$(cd "$script_dir/.." && pwd)"
-import_script="$repo_root/cli/import-audio.sh"
-subtitle_script="$repo_root/cli/extract-subtitles.sh"
-transcribe_script="$repo_root/cli/transcribe-audio.sh"
-render_script="$repo_root/cli/render-listening-note.py"
+import_script="${LISTENKIT_IMPORT_AUDIO:-$repo_root/cli/import-audio.sh}"
+subtitle_script="${LISTENKIT_EXTRACT_SUBTITLES:-$repo_root/cli/extract-subtitles.sh}"
+transcribe_script="${LISTENKIT_TRANSCRIBE_AUDIO:-$repo_root/cli/transcribe-audio.sh}"
+render_script="${LISTENKIT_RENDER_NOTE:-$repo_root/cli/render-listening-note.py}"
+cli_python="$(listenkit_find_cli_python)"
 
 output_dir="$(dirname "$output_path")"
 mkdir -p "$output_dir"
@@ -299,7 +334,7 @@ EOF
       if [[ -z "$title" ]]; then
         title="${url_title:-$output_stem}"
       fi
-      "$render_script" \
+      "$cli_python" "$render_script" \
         --source-ref "$source_ref" \
         --transcript-json "$transcript_json" \
         --title "$title" \
@@ -344,14 +379,19 @@ if [[ "$subtitle_available" != "true" ]]; then
     --locale "$locale"
     --engine "$engine"
     --output "$transcript_json"
+    --device "$device"
+    --compute-type "$compute_type"
   )
+  if [[ -n "$device_index" ]]; then
+    transcribe_command+=(--device-index "$device_index")
+  fi
   if [[ "$auto_init" == "true" ]]; then
     transcribe_command+=(--auto-init)
   fi
   "${transcribe_command[@]}" >/dev/null
 fi
 
-"$render_script" \
+"$cli_python" "$render_script" \
   --source-ref "$source_ref" \
   --transcript-json "$transcript_json" \
   --title "$title" \

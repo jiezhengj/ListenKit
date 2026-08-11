@@ -132,6 +132,7 @@ def probe_cuda_devices(
             environment=env,
             timeout=CUDA_PROBE_TIMEOUT_SECONDS,
             check=False,
+            isolate_python=True,
         )
     except CommandExecutionError as exc:
         return CudaProbe((), str(exc))
@@ -324,19 +325,20 @@ def _cpu_selection(compute_type: str, reason: str) -> DeviceSelection:
 def _query_nvidia_smi(
     *, environment: Mapping[str, str] | None = None
 ) -> dict[int, dict[str, object]]:
-    executable = find_command("nvidia-smi")
+    env = os.environ if environment is None else environment
+    executable = find_command("nvidia-smi", environment=env)
     if not executable:
         return {}
     fields = ("index", "name", "uuid", "memory.total", "memory.free", "compute_cap")
     try:
-        result = _run_nvidia_smi_query(executable, fields, environment)
+        result = _run_nvidia_smi_query(executable, fields, env)
     except CommandExecutionError:
         return {}
     has_compute_capability = result.returncode == 0
     if result.returncode != 0:
         fields = fields[:-1]
         try:
-            result = _run_nvidia_smi_query(executable, fields, environment)
+            result = _run_nvidia_smi_query(executable, fields, env)
         except CommandExecutionError:
             return {}
         if result.returncode != 0:

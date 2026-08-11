@@ -28,6 +28,9 @@ done
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir/.." && pwd)"
+# shellcheck source=cli/_common.sh
+source "$script_dir/_common.sh"
+listenkit_prepare_posix_environment
 venv_dir="${LISTENKIT_FASTER_WHISPER_VENV_DIR:-${HOME}/Library/Caches/ListenKit/venvs/cpython-314}"
 python_executable="$venv_dir/bin/python"
 requirements_file="$repo_root/requirements-faster-whisper.txt"
@@ -35,7 +38,7 @@ import_timeout_seconds="${LISTENKIT_FASTER_WHISPER_IMPORT_TIMEOUT_SECONDS:-60}"
 
 prepare_acceleration() {
   local candidate="$1"
-  PYTHONPATH="$repo_root${PYTHONPATH:+:$PYTHONPATH}" \
+  PYTHONPATH="$repo_root" \
     "$candidate" -c \
     'import pathlib; from listenkit_cli.runtime import prepare_runtime_acceleration; prepare_runtime_acceleration(pathlib.Path(__import__("sys").executable))'
 }

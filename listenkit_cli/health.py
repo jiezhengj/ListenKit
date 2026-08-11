@@ -73,6 +73,7 @@ def python_is_314(executable: Path) -> bool:
             "import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 14) else 1)",
         ],
         check=False,
+        isolate_python=True,
     )
     return result.returncode == 0
 
@@ -91,6 +92,7 @@ def can_import_faster_whisper(
             environment=environment,
             timeout=timeout,
             check=False,
+            isolate_python=True,
         )
     except CommandExecutionError as exc:
         if exc.returncode == 124:
@@ -112,7 +114,11 @@ def inspect_runtime(
     if not executable.is_file():
         raise RuntimeHealthError(f"ListenKit runtime is missing: {executable}")
     try:
-        result = run_command([executable, "-c", METADATA_CODE])
+        result = run_command(
+            [executable, "-c", METADATA_CODE],
+            environment=environment,
+            isolate_python=True,
+        )
         payload = json.loads(result.stdout)
     except (CommandExecutionError, json.JSONDecodeError, KeyError) as exc:
         raise RuntimeHealthError(

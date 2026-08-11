@@ -1,6 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd "$script_dir/.." && pwd)"
+# shellcheck source=cli/_common.sh
+source "$script_dir/_common.sh"
+listenkit_prepare_posix_environment
+
+for argument in "$@"; do
+  case "$argument" in
+    --report-json|--report-json=*)
+      exec "$script_dir/listenkit.sh" transcribe-audio "$@"
+      ;;
+  esac
+done
+
 usage() {
   cat <<'EOF'
 Usage:
@@ -12,9 +26,11 @@ Options:
   --engine <name>          auto, faster-whisper, mlx, or apple. Defaults to auto
   --output <json>          Optional output JSON path
   --auto-init              Allow ListenKit to create and prepare its managed local ASR runtime
+  --interactive-init       Prompt before initializing when running in a real terminal
   --device <name>          auto, cpu, or cuda. Defaults to auto
   --compute-type <name>    CTranslate2 compute type. Defaults to auto
   --device-index <index>   Preferred CUDA device index
+  --report-json <path>     Write a machine-readable execution report through the shared Python core
   --help                   Show this help
 EOF
 }
@@ -24,6 +40,7 @@ locale=""
 engine="auto"
 output_path=""
 auto_init="false"
+interactive_init="false"
 device="auto"
 compute_type="auto"
 device_index=""
@@ -52,6 +69,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --auto-init)
       auto_init="true"
+      shift
+      ;;
+    --interactive-init)
+      interactive_init="true"
       shift
       ;;
     --device)
@@ -97,9 +118,6 @@ if [[ ! -f "$audio_path" ]]; then
   echo "Audio file not found: $audio_path" >&2
   exit 1
 fi
-
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-repo_root="$(cd "$script_dir/.." && pwd)"
 
 reject_error_payload() {
   local payload_path="$1"
@@ -265,7 +283,7 @@ else
     fi
     if [[ "$auto_init" == "true" || "${LISTENKIT_AUTO_INIT:-}" == "1" ]]; then
       python_executable="$(initialize_faster_whisper)"
-    elif [[ -t 0 ]]; then
+    elif [[ "$interactive_init" == "true" && -t 0 ]]; then
       printf 'ListenKit needs faster-whisper installed in %s. Install now? [y/N] ' "$runtime_dir" >&2
       read -r answer
       case "$answer" in
@@ -349,7 +367,7 @@ if [[ "$auto_init" == "true" || "${LISTENKIT_AUTO_INIT:-}" == "1" ]]; then
   core_command+=(--auto-init)
 fi
 
-export PYTHONPATH="$repo_root${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONPATH="$repo_root"
 if [[ -z "${FASTER_WHISPER_PYTHON:-}" ]]; then
   export LISTENKIT_FASTER_WHISPER_VENV_PYTHON="$python_executable"
 fi

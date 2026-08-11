@@ -13,6 +13,7 @@ DEFAULT_RUNTIME_PYTHON = Path.home() / "Library/Caches/ListenKit/venvs/cpython-3
 FASTER_WHISPER_HELPER = REPO_ROOT / "tools" / "faster-whisper" / "transcribe.py"
 MLX_WHISPER_HELPER = REPO_ROOT / "tools" / "mlx-whisper" / "transcribe.py"
 APPLE_HELPER_SOURCE = REPO_ROOT / "tools" / "apple-speech-helper" / "SpeechPermissionApp" / "main.swift"
+APPLE_HELPER_RUNNER = REPO_ROOT / "tools" / "apple-speech-helper" / "run-apple-speech-helper.sh"
 
 
 @unittest.skipIf(os.name == "nt", "Bash runtime contract is tested on Unix CI")
@@ -101,6 +102,13 @@ class RuntimeContractTests(unittest.TestCase):
 
         self.assertIn("let schemaVersion: Int", source)
         self.assertIn('case schemaVersion = "schema_version"', source)
+
+    def test_apple_helper_uses_randomizable_bsd_mktemp_templates(self) -> None:
+        helper = APPLE_HELPER_RUNNER.read_text(encoding="utf-8")
+
+        self.assertNotIn("XXXXXX.json", helper)
+        self.assertNotIn("XXXXXX.log", helper)
+        self.assertEqual(helper.count('.XXXXXX\")'), 3)
 
 
 class FasterWhisperHelperContractTests(unittest.TestCase):

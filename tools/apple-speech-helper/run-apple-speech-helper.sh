@@ -1,6 +1,11 @@
 #!/bin/zsh
 set -euo pipefail
 
+if [[ "$(uname -s)" != "Darwin" ]]; then
+  echo "The Apple Speech helper is available only on macOS." >&2
+  exit 1
+fi
+
 SCRIPT_DIR="${0:A:h}"
 
 APP_DIR="$(zsh "${SCRIPT_DIR}/scripts/build-helper-app.sh")"
@@ -71,9 +76,10 @@ while (( index <= ${#ARGS[@]} )); do
   (( index += 1 ))
 done
 
-OUTPUT_JSON="$(mktemp '/tmp/listenkit-apple-speech-output.XXXXXX.json')"
-OPEN_STDOUT_LOG="$(mktemp '/tmp/listenkit-apple-speech-open-stdout.XXXXXX.log')"
-OPEN_STDERR_LOG="$(mktemp '/tmp/listenkit-apple-speech-open-stderr.XXXXXX.log')"
+TEMP_ROOT="${TMPDIR:-/tmp}"
+OUTPUT_JSON="$(mktemp "${TEMP_ROOT%/}/listenkit-apple-speech-output.XXXXXX")"
+OPEN_STDOUT_LOG="$(mktemp "${TEMP_ROOT%/}/listenkit-apple-speech-open-stdout.XXXXXX")"
+OPEN_STDERR_LOG="$(mktemp "${TEMP_ROOT%/}/listenkit-apple-speech-open-stderr.XXXXXX")"
 cleanup() {
   rm -f "${OUTPUT_JSON}"
   rm -f "${OPEN_STDOUT_LOG}"

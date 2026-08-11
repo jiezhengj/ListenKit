@@ -82,6 +82,43 @@ class TranscribeAudioTests(unittest.TestCase):
             self.assertIn("--auto-init", result.stderr)
             self.assertIn("cli/init-faster-whisper.sh", result.stderr)
 
+    def test_missing_runtime_does_not_prompt_merely_because_stdin_is_a_tty(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            audio = Path(tmpdir) / "sample.m4a"
+            audio.write_bytes(b"fake")
+            env = os.environ.copy()
+            env.pop("FASTER_WHISPER_PYTHON", None)
+            env.pop("LISTENKIT_AUTO_INIT", None)
+            env["LISTENKIT_FASTER_WHISPER_VENV_PYTHON"] = str(
+                Path(tmpdir) / "missing-python"
+            )
+            master, slave = os.openpty()
+            try:
+                result = subprocess.run(
+                    [
+                        str(TRANSCRIBE_SCRIPT),
+                        "--audio-path",
+                        str(audio),
+                        "--locale",
+                        "ja-JP",
+                        "--engine",
+                        "faster-whisper",
+                    ],
+                    check=False,
+                    stdin=slave,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    env=env,
+                    timeout=5,
+                )
+            finally:
+                os.close(master)
+                os.close(slave)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("faster-whisper is not initialized", result.stderr)
+            self.assertNotIn("Install now?", result.stderr)
+
     def test_default_faster_whisper_helper_can_be_mocked(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             audio = Path(tmpdir) / "sample.m4a"

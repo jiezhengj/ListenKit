@@ -5,8 +5,10 @@ import platform
 from pathlib import Path
 from typing import Mapping
 
+from . import __version__
 from .asr_device import probe_cuda_devices, select_asr_device
 from .cuda_runtime import nvidia_driver_available
+from .execution_report import EXECUTION_REPORT_SCHEMA_VERSION
 from .health import RuntimeHealthError, inspect_runtime
 from .mlx_runtime import is_apple_silicon, probe_mlx_runtime
 from .platform_paths import (
@@ -16,6 +18,9 @@ from .platform_paths import (
     runtime_python_path,
 )
 from .process import find_command
+from .rendering import CURRENT_TRANSCRIPT_SCHEMA_VERSION
+
+DOCTOR_SCHEMA_VERSION = 1
 
 
 def doctor_lines(environment: Mapping[str, str] | None = None) -> list[str]:
@@ -39,14 +44,18 @@ def doctor_lines(environment: Mapping[str, str] | None = None) -> list[str]:
         platform=current_platform, machine=platform.machine()
     )
     lines = [
+        f"listenkit_version={__version__}",
+        f"doctor_schema_version={DOCTOR_SCHEMA_VERSION}",
+        f"transcript_schema_version={CURRENT_TRANSCRIPT_SCHEMA_VERSION}",
+        f"execution_report_schema_version={EXECUTION_REPORT_SCHEMA_VERSION}",
         f"platform={current_platform}",
         f"architecture={platform.machine()}",
         f"os_version={platform.platform()}",
         f"runtime_dir={runtime_dir}",
         f"runtime_python={runtime_python}",
-        f"yt_dlp_path={find_command('yt-dlp') or 'missing'}",
-        f"ffmpeg_path={find_command('ffmpeg') or 'missing'}",
-        f"nvidia_smi_path={find_command('nvidia-smi') or 'missing'}",
+        f"yt_dlp_path={find_command('yt-dlp', environment=env) or 'missing'}",
+        f"ffmpeg_path={find_command('ffmpeg', environment=env) or 'missing'}",
+        f"nvidia_smi_path={find_command('nvidia-smi', environment=env) or 'missing'}",
         f"powershell_version={env.get('LISTENKIT_POWERSHELL_VERSION', 'not-applicable')}",
         f"huggingface_hub_cache={hub_cache}",
         f"model_small_cache={'ready' if model_ready else 'missing'}",

@@ -13,8 +13,8 @@ git clone https://github.com/feiyanqiqiao/ListenKit.git
 cd ListenKit
 # macOS 使用 Homebrew；Linux 请通过系统包管理器安装同名工具。
 brew install yt-dlp ffmpeg
-cli/generate-markdown.sh --help
-cli/generate-markdown.sh --url "https://example.com/video" --language Japanese --output work/sample.md --auto-init
+cli/listenkit.sh generate-markdown --help
+cli/listenkit.sh generate-markdown --url "https://example.com/video" --language Japanese --output work/sample.md --report-json work/sample.execution.json --auto-init
 ```
 
 Windows 10/11 PowerShell：
@@ -23,11 +23,14 @@ Windows 10/11 PowerShell：
 winget install Python.Python.3.14
 winget install yt-dlp.yt-dlp
 winget install Gyan.FFmpeg
-.\cli\generate-markdown.ps1 --help
-.\cli\generate-markdown.ps1 --url "https://example.com/video" --language Japanese --output work\sample.md --auto-init
+.\cli\listenkit.ps1 generate-markdown --help
+.\cli\listenkit.ps1 generate-markdown --url "https://example.com/video" --language Japanese --output work\sample.md --report-json work\sample.execution.json --auto-init
 ```
 
-Windows 流程是原生 PowerShell 实现，不依赖 Bash、WSL、Git Bash 或 MSYS2。如果脚本执行策略受限，可使用 `powershell -ExecutionPolicy Bypass -File .\cli\generate-markdown.ps1 ...`。
+Windows 流程是原生 PowerShell 实现，不依赖 Bash、WSL、Git Bash 或 MSYS2。
+POSIX `.sh` 入口在 Git Bash/MSYS2/Cygwin 中会主动以退出码 64 拒绝；请使用
+Python 或 PowerShell 分发器。如果脚本执行策略受限，可使用
+`powershell -NoProfile -ExecutionPolicy Bypass -File .\cli\listenkit.ps1 generate-markdown ...`。
 
 默认 ASR 策略会优先准备和使用硬件加速：
 
@@ -41,7 +44,12 @@ Windows 流程是原生 PowerShell 实现，不依赖 Bash、WSL、Git Bash 或 
 ```text
 work/sample.md
 work/sample.json
+work/sample.execution.json
 ```
+
+执行报告是可选产物，包含成功或失败、耗时、产物路径和实际 ASR
+后端元数据，不复制完整转写正文。具备兼容 Python 的 Agent 也可以从仓库根目录
+直接调用跨平台的 `python -m listenkit_cli generate-markdown`。
 
 ## 安装给 AI Agent
 
@@ -85,7 +93,12 @@ ListenKit 不绑定 Codex，也不只支持日语。公开 CLI 支持 Japanese�
 - Claude：`adapters/claude/CLAUDE.md`
 - Cursor：`adapters/cursor/foreign-listening.md`
 
-正常集成只应调用 macOS / Linux / WSL 的 `cli/generate-markdown.sh`，或原生 Windows 的 `.\cli\generate-markdown.ps1`，不要重复实现下载、字幕选择、ASR 和渲染流程。若下游流程已经选好明确时间段，应调用 `cli/export-audio-slices.py`，而不是直接调用 `ffmpeg`。
+正常集成只应调用共享的 `generate-markdown` 命令：跨平台 Python
+入口、macOS / Linux / WSL 的 `cli/listenkit.sh generate-markdown`，或原生
+Windows 的 `.\cli\listenkit.ps1 generate-markdown`。需要文件化执行状态时使用
+`--report-json`。不要重复实现下载、字幕选择、ASR 和渲染流程。若下游流程
+已经选好明确时间段，应调用 `cli/export-audio-slices.py`，而不是直接调用
+`ffmpeg`。
 
 ## 隐私与版权
 

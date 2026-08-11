@@ -436,6 +436,59 @@ exit 42
             self.assertIn("# Manual Title", rendered)
             self.assertIn("Locale: `en-GB`", rendered)
 
+    def test_device_controls_are_forwarded_to_transcription(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmpdir = Path(tmp)
+            source = tmpdir / "clip.wav"
+            output = tmpdir / "out.md"
+            source.write_bytes(b"fake")
+            env = self.base_env(tmpdir)
+            self.add_fake_ffmpeg(tmpdir, env)
+            fake_transcribe = tmpdir / "fake-transcribe.sh"
+            fake_transcribe.write_text(
+                "#!/usr/bin/env bash\n"
+                "printf '%s\\n' \"$@\" > \"$TRANSCRIBE_ARGS_LOG\"\n"
+                "output=''\n"
+                "previous=''\n"
+                "for argument in \"$@\"; do\n"
+                "  if [[ \"$previous\" == '--output' ]]; then output=\"$argument\"; fi\n"
+                "  previous=\"$argument\"\n"
+                "done\n"
+                "printf '{\"schema_version\":1,\"engine\":\"mock\",\"locale\":\"en-US\",\"full_text\":\"ok\",\"segments\":[],\"timing_complete\":true}\\n' > \"$output\"\n"
+                "printf '%s\\n' \"$output\"\n",
+                encoding="utf-8",
+            )
+            fake_transcribe.chmod(0o755)
+            env["LISTENKIT_TRANSCRIBE_AUDIO"] = str(fake_transcribe)
+            env["TRANSCRIBE_ARGS_LOG"] = str(tmpdir / "transcribe-args.log")
+            result = subprocess.run(
+                [
+                    str(GENERATE_SCRIPT),
+                    "--input",
+                    str(source),
+                    "--language",
+                    "English",
+                    "--output",
+                    str(output),
+                    "--device",
+                    "cuda",
+                    "--compute-type",
+                    "float16",
+                    "--device-index",
+                    "2",
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=env,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            forwarded = (tmpdir / "transcribe-args.log").read_text(encoding="utf-8")
+            self.assertIn("--device\ncuda\n", forwarded)
+            self.assertIn("--compute-type\nfloat16\n", forwarded)
+            self.assertIn("--device-index\n2\n", forwarded)
+
     def test_rejects_multiple_public_inputs(self) -> None:
         result = subprocess.run(
             [

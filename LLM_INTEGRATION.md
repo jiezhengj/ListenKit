@@ -36,27 +36,58 @@ If a user asks you to read this GitHub repository and use ListenKit once, you ma
 
 ## Public Entrypoint
 
-Use one command for normal URL or local media workflows:
+The shared Python CLI is the programmatic source of truth. From the repository
+root, an Agent with Python 3.10+ may use the same command on every platform:
 
 ```bash
-cli/generate-markdown.sh \
+python -m listenkit_cli generate-markdown \
   --url "https://example.com/video" \
   --language Japanese \
   --output work/sample-transcript.md \
+  --report-json work/sample-execution.json \
   --auto-init
 ```
 
-On native Windows, use the matching PowerShell entrypoint:
+When the host Python environment or `PYTHONPATH` is uncertain, use the platform
+dispatcher. It sanitizes inherited Python environment variables and selects a
+compatible CLI interpreter:
+
+```bash
+cli/listenkit.sh generate-markdown \
+  --url "https://example.com/video" \
+  --language Japanese \
+  --output work/sample-transcript.md \
+  --report-json work/sample-execution.json \
+  --auto-init
+```
+
+On native Windows, use the matching PowerShell dispatcher:
 
 ```powershell
-.\cli\generate-markdown.ps1 `
+.\cli\listenkit.ps1 generate-markdown `
   --url "https://example.com/video" `
   --language Japanese `
   --output work\sample-transcript.md `
+  --report-json work\sample-execution.json `
   --auto-init
 ```
 
-Use `.sh` on macOS/Linux/WSL and `.ps1` on native Windows. Do not route native Windows through WSL: WSL has a separate filesystem, runtime path, and dependency environment.
+`cli/generate-markdown.sh` and `.\cli\generate-markdown.ps1` remain supported
+high-level convenience wrappers. Use `.sh` only on macOS/Linux/WSL and `.ps1`
+on native Windows. Git Bash, MSYS2, and Cygwin are native Windows environments,
+not WSL; the `.sh` entrypoints fail fast there with exit 64. Use the Python CLI
+or PowerShell dispatcher instead. Do not route native Windows through WSL
+because WSL has a separate filesystem, runtime path, and dependency environment.
+If script execution is restricted, invoke the dispatcher with
+`powershell -NoProfile -ExecutionPolicy Bypass -File .\cli\listenkit.ps1 ...`.
+
+The Windows dispatcher removes inherited `PYTHONHOME` and `PYTHONPATH`, uses
+UTF-8 I/O, and probes each interpreter by running it. Its automatic order is an
+explicit `LISTENKIT_CLI_PYTHON`, the managed runtime, the standard per-user and
+Program Files Python 3.14 locations, then `py -3.14`, `python3.14`, and `python`.
+The CLI host needs Python 3.10+; creating or repairing the managed ASR runtime
+still requires a genuine Python 3.14 interpreter. Direct `python -m listenkit_cli`
+also configures its public stdout and stderr streams as UTF-8 on Windows.
 
 For local media, replace `--url <url>` with `--input <path>`.
 
@@ -68,6 +99,9 @@ leave the engine and device on `auto` and should not force CPU unless the user
 requests reproducible CPU execution. `--auto-init` authorizes creation or repair
 of a missing core runtime. Initialization and managed-runtime transcription may
 download platform acceleration dependencies and the selected local model.
+All automation entrypoints are non-interactive by default. A missing runtime
+returns an error unless `--auto-init` or `LISTENKIT_AUTO_INIT=1` explicitly
+authorizes initialization.
 
 For URL input, the Markdown title defaults to the video's platform title when available. For local input, the title defaults to the source filename. Use `--title` only when the caller needs an explicit override.
 
@@ -88,6 +122,16 @@ Downstream agents may consume either artifact:
 
 - Use Markdown when the next step needs a readable transcript.
 - Use JSON when the next step needs structured text, segments, timing, or engine metadata.
+
+When `--report-json <path>` is supplied, ListenKit also atomically writes a
+separate execution report. It records `status`, elapsed time, artifact paths,
+actual engine/device metadata and fallback diagnostics, or a structured error.
+The execution report does not contain the full transcript and must not use the
+same path as the Markdown or transcript JSON.
+
+For version negotiation, `doctor` reports `listenkit_version`,
+`doctor_schema_version`, `transcript_schema_version`, and
+`execution_report_schema_version` before platform-specific diagnostics.
 
 ## Optional Audio Slice Export
 

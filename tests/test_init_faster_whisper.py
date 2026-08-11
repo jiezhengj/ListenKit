@@ -8,6 +8,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 INIT_SCRIPT = REPO_ROOT / "cli" / "init-faster-whisper.sh"
 CHECK_RUNTIME = REPO_ROOT / "cli" / "check-runtime.sh"
+COMMON_SCRIPT = REPO_ROOT / "cli" / "_common.sh"
 REQUIREMENTS = REPO_ROOT / "requirements-faster-whisper.txt"
 CUDA_REQUIREMENTS = REPO_ROOT / "requirements-faster-whisper-cuda.txt"
 MLX_REQUIREMENTS = REPO_ROOT / "requirements-mlx-whisper.txt"
@@ -77,6 +78,9 @@ class InitFasterWhisperTests(unittest.TestCase):
             script.parent.mkdir(parents=True)
             venv_python.parent.mkdir(parents=True)
             script.write_text(INIT_SCRIPT.read_text(encoding="utf-8"), encoding="utf-8")
+            (script.parent / "_common.sh").write_text(
+                COMMON_SCRIPT.read_text(encoding="utf-8"), encoding="utf-8"
+            )
             script.chmod(0o755)
             venv_python.write_text(
                 "#!/usr/bin/env bash\n"
@@ -112,6 +116,9 @@ class InitFasterWhisperTests(unittest.TestCase):
             script.parent.mkdir(parents=True)
             venv_python.parent.mkdir(parents=True)
             script.write_text(INIT_SCRIPT.read_text(encoding="utf-8"), encoding="utf-8")
+            (script.parent / "_common.sh").write_text(
+                COMMON_SCRIPT.read_text(encoding="utf-8"), encoding="utf-8"
+            )
             script.chmod(0o755)
             venv_python.write_text(
                 "#!/usr/bin/env bash\n"

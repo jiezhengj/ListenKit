@@ -13,8 +13,8 @@ git clone https://github.com/feiyanqiqiao/ListenKit.git
 cd ListenKit
 # macOS/Homebrew path. Linux users should install yt-dlp and ffmpeg with their package manager.
 brew install yt-dlp ffmpeg
-cli/generate-markdown.sh --help
-cli/generate-markdown.sh --url "https://example.com/video" --language Japanese --output work/sample.md --auto-init
+cli/listenkit.sh generate-markdown --help
+cli/listenkit.sh generate-markdown --url "https://example.com/video" --language Japanese --output work/sample.md --report-json work/sample.execution.json --auto-init
 ```
 
 Windows 10/11 PowerShell:
@@ -23,11 +23,14 @@ Windows 10/11 PowerShell:
 winget install Python.Python.3.14
 winget install yt-dlp.yt-dlp
 winget install Gyan.FFmpeg
-.\cli\generate-markdown.ps1 --help
-.\cli\generate-markdown.ps1 --url "https://example.com/video" --language Japanese --output work\sample.md --auto-init
+.\cli\listenkit.ps1 generate-markdown --help
+.\cli\listenkit.ps1 generate-markdown --url "https://example.com/video" --language Japanese --output work\sample.md --report-json work\sample.execution.json --auto-init
 ```
 
-The Windows workflow is native: it does not require Bash, WSL, Git Bash, or MSYS2. If script execution is restricted, run the same entrypoint with `powershell -ExecutionPolicy Bypass -File .\cli\generate-markdown.ps1 ...`.
+The Windows workflow is native: it does not require Bash, WSL, Git Bash, or
+MSYS2. POSIX `.sh` entrypoints intentionally exit 64 in Git Bash/MSYS2/Cygwin;
+use the Python or PowerShell dispatcher. If script execution is restricted, run
+`powershell -NoProfile -ExecutionPolicy Bypass -File .\cli\listenkit.ps1 generate-markdown ...`.
 
 ASR defaults to acceleration-first execution. On Apple Silicon macOS, ListenKit
 prepares MLX Whisper and selects the Metal GPU. On Windows and Linux, it detects
@@ -42,7 +45,13 @@ This writes:
 ```text
 work/sample.md
 work/sample.json
+work/sample.execution.json
 ```
+
+The execution report is optional. It records success or failure, elapsed time,
+artifact paths, and actual ASR backend metadata without duplicating transcript
+text. Agents may also call `python -m listenkit_cli generate-markdown` directly
+from the repository root on every platform.
 
 ## Install For Your AI Agent
 
@@ -65,6 +74,8 @@ If you do not know the target path yet, use the `--print` fallback described in 
 - `docs/output-format.md`: transcript Markdown and JSON output shape
 - `cli/init-faster-whisper.sh`: managed ASR runtime initializer for macOS/Linux/WSL
 - `cli/check-runtime.sh`: read-only Python 3.14 and faster-whisper health check for Bash environments
+- `cli/listenkit.sh`: macOS/Linux/WSL unified dispatcher with Agent environment isolation
+- `cli/doctor.sh`: read-only macOS/Linux/WSL platform and dependency diagnosis
 - `cli/init-faster-whisper.ps1`: native Windows managed ASR runtime initializer
 - `cli/check-runtime.ps1`: native Windows runtime health check
 - `cli/generate-markdown.ps1`: native Windows public transcript entrypoint
@@ -74,8 +85,9 @@ If you do not know the target path yet, use the `--print` fallback described in 
 
 ```text
 URL or local media
-  -> cli/generate-markdown.sh (macOS/Linux/WSL)
-     or cli\generate-markdown.ps1 (native Windows)
+  -> python -m listenkit_cli generate-markdown (cross-platform)
+     or cli/listenkit.sh generate-markdown (macOS/Linux/WSL)
+     or cli\listenkit.ps1 generate-markdown (native Windows)
   -> transcript Markdown + same-stem transcript JSON
 ```
 
@@ -105,9 +117,15 @@ Output:
 - Claude: `adapters/claude/CLAUDE.md`
 - Cursor: `adapters/cursor/foreign-listening.md`
 
-Adapters should call the public `cli/generate-markdown.sh` entrypoint for normal use, then consume either the generated Markdown or same-stem JSON. When a downstream workflow has already selected time ranges, call `cli/export-audio-slices.py` instead of invoking `ffmpeg` directly. Adapters should not reimplement import, subtitle extraction, transcription, rendering, or downstream note systems.
+Adapters should call the shared `generate-markdown` command for normal use,
+then consume either the generated Markdown or same-stem JSON. Use
+`--report-json` when file-based status is more reliable than captured stdout.
+When a downstream workflow has already selected time ranges, call
+`cli/export-audio-slices.py` instead of invoking `ffmpeg` directly. Adapters
+should not reimplement import, subtitle extraction, transcription, rendering,
+or downstream note systems.
 
-On Windows, adapters use `.\cli\generate-markdown.ps1` instead. Both entrypoints preserve the same parameters and output contract.
+The Python CLI and platform dispatchers preserve the same parameters and output contract.
 
 ## Privacy and Copyright
 

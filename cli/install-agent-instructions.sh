@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=cli/_common.sh
+source "$script_dir/_common.sh"
+listenkit_prepare_posix_environment
+
 usage() {
   cat <<'EOF'
 Usage:
@@ -58,7 +63,6 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir/.." && pwd)"
 source_file="$repo_root/adapters/agent/listenkit-agent-instructions.md"
 
@@ -122,5 +126,14 @@ if [[ -e "$target_file" && "$force" != "true" ]]; then
   exit 1
 fi
 
-cp "$source_file" "$target_file"
+target_parent="$(dirname "$target_file")"
+target_name="$(basename "$target_file")"
+temporary_file="$(mktemp "$target_parent/.${target_name}.XXXXXX")"
+cleanup_temporary() {
+  rm -f "$temporary_file"
+}
+trap cleanup_temporary EXIT
+cp "$source_file" "$temporary_file"
+mv -f "$temporary_file" "$target_file"
+trap - EXIT
 printf '%s\n' "$target_file"

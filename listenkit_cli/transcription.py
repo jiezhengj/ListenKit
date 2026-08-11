@@ -98,7 +98,7 @@ def transcribe_audio(
             "auto, faster-whisper, mlx, apple."
         )
     if requested_engine == "apple":
-        if platform_id() == "windows":
+        if platform_id() != "macos":
             raise ListenKitError("The Apple Speech backend is available only on macOS.")
         helper = Path(
             env.get(
@@ -377,6 +377,7 @@ def _run_faster_whisper_helper(
         ],
         environment=environment,
         check=False,
+        isolate_python=True,
     )
 
 
@@ -437,6 +438,7 @@ def _run_mlx_whisper_helper(
         ],
         environment=environment,
         check=False,
+        isolate_python=True,
     )
 
 
