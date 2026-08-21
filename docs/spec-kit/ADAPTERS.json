@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "anchors": [
+    {
+      "id": "anchor-a54ff182c7e8acf5",
+      "path": "AGENTS.md",
+      "format": "markdown",
+      "delivery_mode": "loader",
+      "marker_start": "<!-- PROJECT-SPEC-KIT-GOVERNANCE:START -->",
+      "marker_end": "<!-- PROJECT-SPEC-KIT-GOVERNANCE:END -->",
+      "managed_content_sha256": "ac046fed4fb54b26eee24f6fae484229707aab240399adfa511c15cdecff67f7",
+      "status": "rendered",
+      "managed": true
+    }
+  ],
+  "bindings": [
+    {
+      "runtime_id": "codex",
+      "display_name": "Codex CLI",
+      "integration_key": "codex",
+      "integration_mode": "native",
+      "status_evidence_sha256": "b6ccf47b5244febd8713912a94ff68ac6e30ea893d5bcddf31031b02f87afac8",
+      "default_integration_changed": false,
+      "anchor_ids": [
+        "anchor-a54ff182c7e8acf5"
+      ],
+      "capabilities": {
+        "core_workflow": "verified",
+        "extensions": "not-verified",
+        "presets": "not-verified",
+        "events": "not-verified"
+      },
+      "verification": {
+        "status": "active",
+        "specify_version": "0.16.6.dev0",
+        "product_version": "codex",
+        "verified_at": "2026-08-21T15:15:00Z",
+        "method": "fresh-session-loader",
+        "evidence": "docs/spec-kit/evidence/onboard-codex.json"
+      }
+    },
+    {
+      "runtime_id": "antigravity",
+      "display_name": "Antigravity",
+      "integration_key": "codex",
+      "integration_mode": "native",
+      "status_evidence_sha256": "eb8509fc1d5f4c5714999183d9128ce99b57e9803a5764d24e2469f8193f7269",
+      "default_integration_changed": false,
+      "anchor_ids": [
+        "anchor-a54ff182c7e8acf5"
+      ],
+      "capabilities": {
+        "core_workflow": "verified",
+        "extensions": "not-verified",
+        "presets": "not-verified",
+        "events": "not-verified"
+      },
+      "verification": {
+        "status": "active",
+        "specify_version": "0.16.6.dev0",
+        "product_version": "antigravity",
+        "verified_at": "2026-08-21T15:15:00Z",
+        "method": "fresh-session-loader",
+        "evidence": "docs/spec-kit/evidence/onboard-antigravity.json"
+      }
+    }
+  ]
+}

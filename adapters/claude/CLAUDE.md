@@ -1,11 +1,8 @@
 # ListenKit
 
-Use the repository CLI. Do not reimplement the pipeline in prompt text. Prefer
-`python -m listenkit_cli generate-markdown` from the repository root. When the
-host Python environment is uncertain, use `cli/listenkit.sh generate-markdown`
-on macOS/Linux/WSL or `.\cli\listenkit.ps1 generate-markdown` on native Windows.
+使用仓库 CLI，不要在提示文本中重实现 pipeline。优先从仓库根目录调用 `python -m listenkit_cli generate-markdown`；主机 Python 环境不确定时，在 macOS/Linux/WSL 使用 `cli/listenkit.sh generate-markdown`，原生 Windows 使用 `.\cli\listenkit.ps1 generate-markdown`。
 
-Normal workflow:
+正常流程：
 
 ```bash
 cli/listenkit.sh generate-markdown \
@@ -16,22 +13,18 @@ cli/listenkit.sh generate-markdown \
   --auto-init
 ```
 
-The high-level command also accepts `--input <path>` as the single input source. It derives the ASR locale from `--language`. URL titles default to the video's platform title when available; local titles default to the source filename unless optional overrides are provided.
+高层命令也接受单一输入源 `--input <path>`，并从 `--language` 推导 ASR locale。URL 标题默认使用平台标题；本地标题默认使用源文件名，除非显式覆盖。
 
-Leave ASR engine and device selection on their automatic defaults. Do not force CPU unless the user explicitly requests reproducible CPU execution.
+保持 ASR 引擎和设备为自动默认值。只有用户明确要求可复现的 CPU 执行时才强制 CPU。
 
-For `--output path/name.md`, consume `path/name.md` as the readable transcript and `path/name.json` as the structured transcript artifact.
-Read the optional execution report for status and backend diagnostics when
-stdout capture is unreliable. Do not modify ListenKit to work around Claude
-host PATH or shell limitations.
+对于 `--output path/name.md`，将 `path/name.md` 作为可读转写，将 `path/name.json` 作为结构化产物。stdout 捕获不可靠时读取 execution report，不要修改 ListenKit 以迁就 Claude 宿主的 PATH 或 shell。
 
-For URL input, the high-level command tries platform subtitles first and still attempts to import local audio. If subtitles are unavailable, it falls back to imported audio plus ASR.
+URL 输入会优先尝试平台字幕，同时尝试导入本地音频；字幕不可用时回退到导入音频和 ASR。
 
-Do not call lower-level import, subtitle extraction, ASR, rendering, raw downloader, or `tools/*` workflows in normal integrations. They are ListenKit debugging and maintenance interfaces only.
+正常集成不得调用低层导入、字幕提取、ASR、渲染、原始下载器或 `tools/*`；这些只用于 ListenKit 调试和维护。
 
-Keep the output to transcript JSON or plain transcript Markdown. Do not add learning-note templates, Obsidian-only syntax, Anki cards, or review scheduling unless a downstream project explicitly requests that transformation.
+输出保持为 transcript JSON 或纯 transcript Markdown。除非下游项目明确要求，不添加学习笔记模板、Obsidian 语法、Anki 卡片或复习计划。
 
-The Windows command accepts the same flags and produces the same output pair. Native Windows must not be routed through WSL because its runtime and paths are separate.
-Git Bash/MSYS2/Cygwin are native Windows and the `.sh` entrypoints exit 64 there;
-use the Python or PowerShell dispatcher. Prefer `--report-json` over modifying
-ListenKit for host PATH, shell, or stdout-capture limitations.
+Windows 参数和输出契约相同。原生 Windows 不得通过 WSL；Git Bash/MSYS2/Cygwin 是原生 Windows，`.sh` 入口会以退出码 64 失败，请使用 Python 或 PowerShell 分发器。宿主 stdout、shell 或 PATH 有问题时优先使用 `--report-json`。
+
+只处理你有权下载、录制、转写和学习的材料；不要重新分发受版权保护的音频或转写稿。完整边界见 `PRIVACY_AND_COPYRIGHT.md`。

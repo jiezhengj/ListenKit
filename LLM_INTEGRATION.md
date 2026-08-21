@@ -1,43 +1,42 @@
-# ListenKit LLM Integration Contract
+# ListenKit LLM 集成契约
 
-This document is the source of truth for external LLM agents and automation integrations. Keep `adapters/agent/listenkit-agent-instructions.md` in sync with the key invariants here.
+本文档是外部 LLM Agent 和自动化集成的事实来源。关键不变量必须同步到 `adapters/agent/listenkit-agent-instructions.md`。
 
-## Agent Install And Use
+## Agent 安装与使用
 
-If a user asks you to read this GitHub repository and install ListenKit:
+当用户要求读取 GitHub 仓库并安装 ListenKit 时：
 
-1. Clone the repository and enter it.
-2. Check whether `yt-dlp` and `ffmpeg` are available. If either is missing, ask the user to install or authorize installing the dependency; do not bypass ListenKit with lower-level pipeline commands.
-3. Install the agent instruction summary if you know the user's agent rules/context target:
+1. 克隆仓库并进入仓库目录。
+2. 检查 `yt-dlp` 和 `ffmpeg` 是否可用。缺少任一依赖时，询问用户安装或授权安装；不得使用低层 pipeline 绕过 ListenKit。
+3. 如果知道用户的 Agent 规则或上下文目标，安装 Agent 指令：
 
    ```bash
    cli/install-agent-instructions.sh --target <agent-rules-file-or-dir>
    ```
 
-   On Windows, use `.\cli\install-agent-instructions.ps1 --target <agent-rules-file-or-dir>`.
+   Windows 使用 `.\cli\install-agent-instructions.ps1 --target <agent-rules-file-or-dir>`。
 
-4. If you do not know the persistent rules/context target, do not guess. Use this exact prompt:
+4. 如果不知道持久化规则或上下文目标，不得猜测。使用以下固定提示：
 
    ```text
    I can install ListenKit instructions, but I need the path to your agent rules/context file or directory. If you only want to use it once, I can skip installation and run ListenKit directly.
    ```
 
-5. If the user needs a pasteable fallback, print the instructions:
+5. 如果用户需要可粘贴的备用内容，打印指令：
 
    ```bash
    cli/install-agent-instructions.sh --print
    ```
 
-`cli/install-agent-instructions.sh` installs agent instructions only. It does not install Homebrew packages, Python, faster-whisper, Apple Speech assets, or ASR model files.
+`cli/install-agent-instructions.sh` 只安装 Agent instructions，不安装 Homebrew 软件包、Python、faster-whisper、Apple Speech 资源或 ASR 模型文件。对应的原生 Windows 安装器是 `.\cli\install-agent-instructions.ps1`，范围相同。
 
-The corresponding native Windows installer is `.\cli\install-agent-instructions.ps1`; it has the same limited scope.
+持久安装模式支持 `--force` 覆盖已有目标和 `--dry-run` 只显示 source/target 而不写文件；`--dry-run` 必须与 `--target` 一起使用。`--print` 与 `--target`、`--force`、`--dry-run` 互斥，且只向 stdout 输出可粘贴的指令块。
 
-If a user asks you to read this GitHub repository and use ListenKit once, you may skip persistent installation and run the public entrypoint directly. If the user did not specify `--output`, prefer `work/<safe-source-stem>-transcript.md`; if no stable source stem is available, use `work/transcript.md`. Tell the user when you used ListenKit only for the current task and did not complete persistent agent installation.
+如果用户只要求读取 GitHub 仓库并使用 ListenKit 一次，可以跳过持久安装，直接运行公共入口。用户未指定 `--output` 时，优先使用 `work/<safe-source-stem>-transcript.md`；无法稳定取得 source stem 时使用 `work/transcript.md`。完成后应告知用户本次只使用了 ListenKit，未必完成持久化 Agent 安装。
 
-## Public Entrypoint
+## 公共入口
 
-The shared Python CLI is the programmatic source of truth. From the repository
-root, an Agent with Python 3.10+ may use the same command on every platform:
+共享 Python CLI 是程序化事实来源。使用 Python 3.10+ 的 Agent 可在所有平台从仓库根目录执行同一命令：
 
 ```bash
 python -m listenkit_cli generate-markdown \
@@ -48,9 +47,7 @@ python -m listenkit_cli generate-markdown \
   --auto-init
 ```
 
-When the host Python environment or `PYTHONPATH` is uncertain, use the platform
-dispatcher. It sanitizes inherited Python environment variables and selects a
-compatible CLI interpreter:
+当主机 Python 环境或 `PYTHONPATH` 不确定时，使用平台分发器。它会清理继承的 Python 环境变量并选择兼容的 CLI 解释器：
 
 ```bash
 cli/listenkit.sh generate-markdown \
@@ -61,7 +58,7 @@ cli/listenkit.sh generate-markdown \
   --auto-init
 ```
 
-On native Windows, use the matching PowerShell dispatcher:
+原生 Windows 使用对应的 PowerShell 分发器：
 
 ```powershell
 .\cli\listenkit.ps1 generate-markdown `
@@ -72,70 +69,45 @@ On native Windows, use the matching PowerShell dispatcher:
   --auto-init
 ```
 
-`cli/generate-markdown.sh` and `.\cli\generate-markdown.ps1` remain supported
-high-level convenience wrappers. Use `.sh` only on macOS/Linux/WSL and `.ps1`
-on native Windows. Git Bash, MSYS2, and Cygwin are native Windows environments,
-not WSL; the `.sh` entrypoints fail fast there with exit 64. Use the Python CLI
-or PowerShell dispatcher instead. Do not route native Windows through WSL
-because WSL has a separate filesystem, runtime path, and dependency environment.
-If script execution is restricted, invoke the dispatcher with
-`powershell -NoProfile -ExecutionPolicy Bypass -File .\cli\listenkit.ps1 ...`.
+`cli/generate-markdown.sh` 和 `.\cli\generate-markdown.ps1` 仍是受支持的高层便捷包装器。`.sh` 仅用于 macOS/Linux/WSL；Git Bash、MSYS2 和 Cygwin 是原生 Windows 环境，不是 WSL，其中 `.sh` 入口会主动以退出码 64 失败。请使用 Python 或 PowerShell 分发器，不要把原生 Windows 路由到 WSL，因为 WSL 拥有独立的文件系统、运行时路径和 ASR 环境。
 
-The Windows dispatcher removes inherited `PYTHONHOME` and `PYTHONPATH`, uses
-UTF-8 I/O, and probes each interpreter by running it. Its automatic order is an
-explicit `LISTENKIT_CLI_PYTHON`, the managed runtime, the standard per-user and
-Program Files Python 3.14 locations, then `py -3.14`, `python3.14`, and `python`.
-The CLI host needs Python 3.10+; creating or repairing the managed ASR runtime
-still requires a genuine Python 3.14 interpreter. Direct `python -m listenkit_cli`
-also configures its public stdout and stderr streams as UTF-8 on Windows.
+Windows 分发器会删除继承的 `PYTHONHOME`/`PYTHONPATH`，使用 UTF-8 标准输入输出，并按以下顺序探测 Python：显式 `LISTENKIT_CLI_PYTHON`、托管运行时、标准用户目录和 Program Files 的 Python 3.14、`py -3.14`、`python3.14`、`python`。CLI 主机需要 Python 3.10+；创建或修复托管 ASR 运行时仍需要真正的 Python 3.14。直接调用 `python -m listenkit_cli` 时，Windows 也会配置 UTF-8 流。
 
-For local media, replace `--url <url>` with `--input <path>`.
+本地媒体输入时，将 `--url <url>` 替换为 `--input <path>`。
 
-ListenKit owns source acquisition, subtitle selection, ASR fallback, transcript normalization, and plain transcript rendering behind this entrypoint. External agents should not reimplement or bypass those stages.
+ListenKit 通过公共入口负责媒体获取、字幕选择、ASR fallback、转写规范化和纯文本转写渲染。外部 Agent 不得重复实现或绕过这些阶段。
 
-Automatic ASR is acceleration-first: Apple Silicon uses a prepared MLX/Metal
-runtime, while Windows/Linux NVIDIA systems use managed CUDA. Agents should
-leave the engine and device on `auto` and should not force CPU unless the user
-requests reproducible CPU execution. `--auto-init` authorizes creation or repair
-of a missing core runtime. Initialization and managed-runtime transcription may
-download platform acceleration dependencies and the selected local model.
-All automation entrypoints are non-interactive by default. A missing runtime
-returns an error unless `--auto-init` or `LISTENKIT_AUTO_INIT=1` explicitly
-authorizes initialization.
+自动 ASR 采用加速优先策略：Apple Silicon 使用准备好的 MLX/Metal 运行时，Windows/Linux NVIDIA 使用托管 CUDA。Agent 应保持引擎和设备为 `auto`，除非用户要求可复现的 CPU 执行，否则不得强制 CPU。`--auto-init` 授权创建或修复缺失的核心运行时。初始化和托管运行时转写可能下载加速依赖及选定模型。所有自动化入口默认非交互；缺失运行时必须返回错误，除非显式提供 `--auto-init` 或 `LISTENKIT_AUTO_INIT=1`。
 
-For URL input, the Markdown title defaults to the video's platform title when available. For local input, the title defaults to the source filename. Use `--title` only when the caller needs an explicit override.
+URL 输入时，Markdown 标题默认使用平台视频标题（如果可用）；本地输入时默认使用源文件名。只有需要显式覆盖时才使用 `--title`。
 
-## Output Contract
+## 输出契约
 
-For an output path like:
+当输出路径为：
 
 ```text
 work/sample-transcript.md
 ```
 
-The platform public entrypoint produces:
+公共入口会生成：
 
-- `work/sample-transcript.md`: human-readable transcript Markdown
-- `work/sample-transcript.json`: structured transcript JSON with normalized text, segments, source engine and actual device metadata, fallback diagnostics, locale, and timing status
+- `work/sample-transcript.md`：可读的转写 Markdown
+- `work/sample-transcript.json`：包含标准化文本、分段、来源引擎、实际设备、fallback 诊断、locale 和时间信息的结构化 JSON
 
-Downstream agents may consume either artifact:
+下游 Agent 可按需要读取：
 
-- Use Markdown when the next step needs a readable transcript.
-- Use JSON when the next step needs structured text, segments, timing, or engine metadata.
+- 下一步需要阅读时使用 Markdown。
+- 下一步需要结构化文本、分段、时间或引擎元数据时使用 JSON。
 
-When `--report-json <path>` is supplied, ListenKit also atomically writes a
-separate execution report. It records `status`, elapsed time, artifact paths,
-actual engine/device metadata and fallback diagnostics, or a structured error.
-The execution report does not contain the full transcript and must not use the
-same path as the Markdown or transcript JSON.
+提供 `--report-json <path>` 时，ListenKit 还会原子写入独立的执行报告。报告记录 `status`、耗时、产物路径、实际引擎/设备元数据、fallback 诊断或结构化错误，不包含完整转写正文，也不得与 Markdown 或 transcript JSON 共用路径。
 
-For version negotiation, `doctor` reports `listenkit_version`,
-`doctor_schema_version`, `transcript_schema_version`, and
-`execution_report_schema_version` before platform-specific diagnostics.
+版本协商时，`doctor` 会在平台诊断前报告 `listenkit_version`、`doctor_schema_version`、`transcript_schema_version` 和 `execution_report_schema_version`。
 
-## Optional Audio Slice Export
+完整字段与 schema 规则见 [`docs/output-format.md`](docs/output-format.md)。
 
-When a downstream workflow has already selected audio time ranges, export the clips through ListenKit:
+## 可选音频片段导出
+
+当下游流程已经选择明确的音频时间范围时，通过 ListenKit 导出片段：
 
 ```bash
 cli/export-audio-slices.py \
@@ -146,7 +118,7 @@ cli/export-audio-slices.py \
   --overwrite
 ```
 
-The manifest is intentionally generic:
+manifest 是通用格式：
 
 ```json
 {
@@ -157,17 +129,15 @@ The manifest is intentionally generic:
 }
 ```
 
-ListenKit validates the ranges, applies bounded padding, exports non-empty same-stem `SNN.m4a` files, and prints a JSON report. Use `--allow-overlap` only when the downstream workflow intentionally wants fully padded overlapping clips and can handle the reported overlap. The downstream workflow still owns semantic grouping, labels, learning-note rendering, and application-specific records.
+ListenKit 会校验范围、应用有界 padding、导出非空且同 stem 的 `SNN.m4a` 文件，并打印 JSON 报告。只有在下游明确需要带 padding 的重叠片段且能够处理报告中的 overlap 时，才使用 `--allow-overlap`。语义分组、标签、学习笔记渲染和应用记录仍由下游流程负责。
 
-## Downstream Transformations
+## 下游转换
 
-ListenKit stops at transcript normalization and plain transcript rendering. After the Markdown or JSON exists, downstream agents may transform it into their own products, such as summaries, learning notes, vocabulary lists, review cards, or app-specific records.
+ListenKit 在转写规范化和纯文本渲染处停止。Markdown 或 JSON 生成后，下游 Agent 可以将其转换为摘要、学习笔记、词汇表、复习卡或应用专属记录。这些转换不属于 ListenKit 契约，不得通过绕过 ListenKit 内部流程来实现。
 
-Those transformations are outside the ListenKit contract and should not be implemented by bypassing ListenKit internals.
+## 不得绕过公共入口
 
-## Do Not Bypass The Entrypoint
-
-In normal integrations, do not call these directly as a shortcut:
+正常集成不得直接调用以下命令作为捷径：
 
 - `yt-dlp`
 - `ffmpeg`
@@ -177,10 +147,8 @@ In normal integrations, do not call these directly as a shortcut:
 - `cli/import-audio.sh`
 - `cli/render-listening-note.py`
 
-On Windows, the corresponding lower-level `.ps1` commands are subject to the same restriction.
+Windows 对应的低层 `.ps1` 命令同样受此规则约束。直接调用低层接口只允许用于 ListenKit 自身调试或维护，详见 [`docs/debugging.md`](docs/debugging.md)。`cli/export-audio-slices.py` 是受支持的例外：下游已经选择明确时间范围时可以调用它。
 
-These are dependency, maintenance, or debugging interfaces. Calling them directly can skip ListenKit's subtitle priority, cleanup, ASR fallback, output naming, provenance, or transcript JSON normalization behavior.
+## 隐私与版权
 
-Use direct low-level calls only when debugging ListenKit itself or maintaining the pipeline. See `docs/debugging.md`.
-
-`cli/export-audio-slices.py` is the supported exception: downstream workflows may call it after they have selected explicit time ranges.
+默认转写在本地完成，但下游 AI 编辑可能将转写文本和元数据发送给所使用的模型服务商。只处理你有权下载、录制、转写和学习的材料，不要使用本项目重新分发受版权保护的音频或转写稿。完整边界见 [`PRIVACY_AND_COPYRIGHT.md`](PRIVACY_AND_COPYRIGHT.md)。

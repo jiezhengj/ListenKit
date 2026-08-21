@@ -1,16 +1,16 @@
-# Install
+# 安装与运行时
 
-This document covers system dependencies, backend initialization, and troubleshooting. External agents should run `python -m listenkit_cli generate-markdown` from the repository root, `cli/listenkit.sh generate-markdown` on macOS/Linux/WSL, or `.\cli\listenkit.ps1 generate-markdown` on native Windows. The older direct wrappers remain supported. Lower-level commands are backend or debugging references, not the public agent entrypoint.
+本文档说明系统依赖、后端初始化和故障排查。外部 Agent 应从仓库根目录运行 `python -m listenkit_cli generate-markdown`，在 macOS/Linux/WSL 使用 `cli/listenkit.sh generate-markdown`，在原生 Windows 使用 `.\cli\listenkit.ps1 generate-markdown`。低层命令仅供后端维护和调试。
 
-## Dependencies
+## 系统依赖
+
+macOS：
 
 ```bash
 brew install yt-dlp ffmpeg
 ```
 
-Linux users should install equivalent `yt-dlp` and `ffmpeg` packages with their system package manager.
-
-Windows 10/11 users can install the verified winget packages from PowerShell:
+Linux 请使用系统包管理器安装等价的 `yt-dlp` 和 `ffmpeg`。Windows 10/11 可使用：
 
 ```powershell
 winget install Python.Python.3.14
@@ -18,101 +18,65 @@ winget install yt-dlp.yt-dlp
 winget install Gyan.FFmpeg
 ```
 
-Restart the terminal after installation, then run `.\cli\doctor.ps1`. ListenKit
-checks `PATH` first and also recognizes `yt-dlp.exe`/`ffmpeg.exe` in the standard
-WinGet Links directory. It does not silently install system packages.
+安装后重新打开终端并运行 `.\cli\doctor.ps1`。ListenKit 优先检查 `PATH`，也识别 WinGet Links 目录中的 `yt-dlp.exe` 和 `ffmpeg.exe`，不会静默安装系统软件包。
 
-Python 3.14 is required for the faster-whisper runtime. On macOS, Homebrew Python 3.14 is the supported bootstrap Python. Other lightweight maintenance scripts remain compatible with Python 3.10+.
+如果 PowerShell 执行策略受限，使用 `powershell -NoProfile -ExecutionPolicy Bypass -File .\cli\listenkit.ps1 doctor`，或对 `generate-markdown` 传入相同的脚本参数。
 
-### Agent and non-login shell behavior
+faster-whisper 运行时需要 Python 3.14；macOS 使用 Homebrew Python 3.14 作为受支持的 bootstrap Python。其它轻量维护脚本兼容 Python 3.10+。
 
-Desktop Agents commonly inherit a reduced `PATH` or set `PYTHONHOME` and
-`PYTHONPATH` for their own embedded Python. `cli/listenkit.sh` and the POSIX
-wrappers remove those Python variables before launching ListenKit, force UTF-8
-I/O, and on macOS probe the standard Apple Silicon and Intel Homebrew prefixes.
-They do not change the parent Agent environment.
+## Agent 与非登录 shell
 
-The native Windows dispatcher provides the same isolation. It removes inherited
-`PYTHONHOME`/`PYTHONPATH` before probing Python, uses UTF-8 stdout/stderr, and
-restores the caller's environment when it exits. Git Bash, MSYS2, and Cygwin are
-native Windows environments: their `.sh` entrypoints intentionally exit 64.
-Use `python -m listenkit_cli` or PowerShell there.
+桌面 Agent 可能继承精简的 `PATH`，或为自身嵌入式 Python 设置 `PYTHONHOME` 和 `PYTHONPATH`。`cli/listenkit.sh` 及 POSIX 包装器会删除这些 Python 变量、强制 UTF-8 I/O，并在 macOS 探测标准 Apple Silicon/Intel Homebrew 前缀，不修改父 Agent 环境。
 
-If a compatible CLI Python is installed outside `PATH`, select it explicitly:
+原生 Windows 分发器提供相同隔离：删除继承的 Python 变量、使用 UTF-8 标准流并恢复调用方环境。Git Bash、MSYS2 和 Cygwin 是原生 Windows 环境，其中 `.sh` 入口会以退出码 64 失败；请使用 Python 或 PowerShell。
+
+如果兼容的 CLI Python 不在 `PATH`，可以显式选择：
 
 ```bash
 LISTENKIT_CLI_PYTHON=/path/to/python3 cli/listenkit.sh doctor
 ```
 
-In PowerShell:
+PowerShell：
 
 ```powershell
 $env:LISTENKIT_CLI_PYTHON = "$env:LOCALAPPDATA\Programs\Python\Python314\python.exe"
 .\cli\listenkit.ps1 doctor
 ```
 
-Without an override, the Windows dispatcher tries the managed runtime, the
-standard per-user and Program Files Python 3.14 locations, then `py -3.14`,
-`python3.14`, and `python`. Every candidate must pass a real version probe, so a
-Microsoft Store alias or an unusable stub is skipped. If the execution policy is
-restricted, use:
+Windows 分发器会依次尝试托管运行时、标准用户目录和 Program Files 的 Python 3.14、`py -3.14`、`python3.14` 和 `python`，每个候选都必须通过真实版本探测。
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\cli\listenkit.ps1 doctor
-```
+CLI 主机需要 Python 3.10+；托管 ASR 运行时固定 Python 3.14。缺失运行时在自动化中不会触发隐式提示；传入 `--auto-init` 才授权准备。低层 Bash transcriber 另有只供人工确认的 `--interactive-init`。
 
-The CLI host needs Python 3.10+; the managed ASR runtime remains pinned to
-Python 3.14. A missing runtime never triggers an implicit prompt in automation.
-Pass `--auto-init` to authorize preparation. The lower-level Bash transcriber
-offers `--interactive-init` only for a human who explicitly wants a terminal
-confirmation.
+## 托管 ASR 运行时
 
-The default ASR environment is platform-specific:
+默认运行时目录：
 
-- macOS and Linux Bash: `~/Library/Caches/ListenKit/venvs/cpython-314`
-- Windows PowerShell: `%LOCALAPPDATA%\ListenKit\venvs\cpython-314`
+- macOS/Linux Bash：`~/Library/Caches/ListenKit/venvs/cpython-314`
+- Windows PowerShell：`%LOCALAPPDATA%\ListenKit\venvs\cpython-314`
 
-On a typical Windows installation, the latter expands to `C:\Users\<username>\AppData\Local\ListenKit\venvs\cpython-314`, and its interpreter is `Scripts\python.exe`. WSL uses the Linux/Bash path inside the WSL filesystem, not the Windows path.
+运行时必须在仓库外和 iCloud Drive 外。它包含大型原生库，避免放在 `Library/Mobile Documents` 下，以免文件协调或下载状态影响加载。使用 `LISTENKIT_FASTER_WHISPER_VENV_DIR` 覆盖时也必须满足这一限制。
 
-The runtime is deliberately stored outside the repository and outside iCloud Drive. It contains large native libraries whose loading can stall while iCloud is hydrating or coordinating files. Do not place the runtime under `Library/Mobile Documents`.
-
-On Apple Silicon, the same managed environment also contains the pinned
-`mlx-whisper` package used for Metal GPU transcription. The optional Apple
-Speech backend requires macOS with Speech APIs and Xcode command line tools for
-the bundled Swift helper build.
-
-## Automatic Backend And Runtime
-
-The default ASR engine is `auto`:
+默认 ASR 引擎为 `auto`：
 
 ```bash
 cli/transcribe-audio.sh --audio-path work/audio/sample.m4a --locale ja-JP --auto-init
 ```
 
-`--auto-init` authorizes ListenKit to create or repair the local Cache runtime
-and install `faster-whisper`. Once the managed runtime exists, transcription
-also verifies and, when needed, prepares MLX/Metal on Apple Silicon or managed
-CUDA on Windows/Linux NVIDIA before selecting a backend. For a one-time manual
-setup, run this script from anywhere:
+`--auto-init` 授权创建或修复本地 Cache 运行时并安装 `faster-whisper`。手动初始化使用：
 
 ```bash
 cli/init-faster-whisper.sh
 ```
 
-The initializer installs the direct dependency pinned in
-`requirements-faster-whisper.txt`. On Apple Silicon it also installs the
-verified `requirements-mlx-whisper.txt` dependency set. Transitive packages
-such as CTranslate2, ONNX Runtime, PyAV, MLX, and mlx-metal are selected by those
-packages. The runtime snapshot under `docs/runtime-snapshot-python314.txt` is
-diagnostic evidence only and is not an installation lock file.
+初始化器使用 `requirements-faster-whisper.txt` 中的直接依赖；Apple Silicon 还使用 `requirements-mlx-whisper.txt`。`docs/runtime-snapshot-python314.txt` 只提供诊断证据，不是安装锁定文件。
 
-Check an existing environment without changing it:
+只读检查已有环境：
 
 ```bash
 cli/check-runtime.sh
 ```
 
-Windows PowerShell has native initialization, health-check, diagnosis, and complete transcript entrypoints:
+Windows 使用原生入口：
 
 ```powershell
 .\cli\init-faster-whisper.ps1
@@ -121,159 +85,50 @@ Windows PowerShell has native initialization, health-check, diagnosis, and compl
 .\cli\listenkit.ps1 generate-markdown --input "C:\Media\sample.m4a" --language English --output work\sample.md --report-json work\sample.execution.json --auto-init --device auto
 ```
 
-The Windows entrypoints support Windows PowerShell 5.1 and PowerShell 7 and run
-through the shared cross-platform Python core. They do not require Bash, Git
-Bash, MSYS2, Cygwin, or WSL. Apple Speech remains macOS-only; Windows uses
-faster-whisper.
+Windows 入口同时支持 PowerShell 5.1 和 7，不依赖 Bash、Git Bash、MSYS2、Cygwin 或 WSL。不要在仓库内使用 `python3 -m venv .venv`，它会绕过受支持的路径和检查。
 
-Do not initialize with `python3 -m venv .venv` in the repository. Use the ListenKit initializer so the native runtime remains outside iCloud and uses the supported Python version.
+## 默认设置与 CUDA
 
-To use a different runtime location, set `LISTENKIT_FASTER_WHISPER_VENV_DIR`. The target must remain outside iCloud Drive:
+- faster-whisper 模型：`small`
+- MLX Whisper 模型：`mlx-community/whisper-small-mlx`
+- beam size：`5`
+- Apple Silicon：MLX Whisper + Metal + `float16`
+- Windows/Linux NVIDIA：自动准备 CUDA 并选择计算类型
+- 无 NVIDIA 的 Windows/Linux：优化 CPU + `int8`
+- Intel macOS：Apple Accelerate 优化 CPU + `int8`
 
-```bash
-LISTENKIT_FASTER_WHISPER_VENV_DIR=/path/outside/icloud \
-  cli/init-faster-whisper.sh
-```
+Windows/Linux 自动模式会先检查 NVIDIA 驱动和 CTranslate2 能力；需要时将 `nvidia-cublas-cu12` 和 `nvidia-cudnn-cu12` 安装到 ListenKit 隔离 venv，不修改系统 CUDA。至少 3072 MiB 专用显存时优先 `float16`，更低时优先 `int8_float16`；所有支持的 CUDA 类型都失败后才记录原因并回退 CPU。`doctor` 只读报告驱动、库、设备、显存和自动选择。
 
-In PowerShell:
+设备控制变量为 `LISTENKIT_ASR_DEVICE`、`LISTENKIT_ASR_COMPUTE_TYPE` 和 `LISTENKIT_CUDA_DEVICE_INDEX`；显式 CLI 参数优先。`--device cuda` 失败时不回退 CPU，`--device cpu` 始终跳过 CUDA 探测。
 
-```powershell
-$env:LISTENKIT_FASTER_WHISPER_VENV_DIR = "D:\ListenKit\venvs\cpython-314"
-.\cli\init-faster-whisper.ps1
-```
+## Apple Silicon MLX/Metal
 
-Advanced users can use an external Python environment:
+Apple Silicon 的 `auto` 会探测并在需要时准备托管 MLX 依赖。Metal 就绪后使用 `mlx-whisper`；首次转写可能下载 `mlx-community/whisper-small-mlx`，后续使用 Hugging Face 缓存。`--engine mlx` 要求该路径；`LISTENKIT_MLX_MODEL` 可覆盖兼容模型仓库；`LISTENKIT_MLX_AUTO_PREPARE=0` 可禁用准备。
 
-```bash
-FASTER_WHISPER_PYTHON=/path/to/python \
-  cli/transcribe-audio.sh --audio-path work/audio/sample.m4a --locale ja-JP
-```
+如果 MLX 准备失败，ListenKit 会打印原因并通过 CTranslate2 Apple Accelerate CPU backend 使用 faster-whisper。`doctor` 只读报告 Apple Silicon、MLX/Metal、版本、模型缓存和自动选择。
 
-In PowerShell:
+## Apple Speech
 
-```powershell
-$env:FASTER_WHISPER_PYTHON = "D:\Python\faster-whisper\Scripts\python.exe"
-.\cli\transcribe-audio.ps1 --audio-path work\audio\sample.m4a --locale ja-JP
-```
-
-Default settings:
-
-- faster-whisper model: `small`
-- MLX Whisper model: `mlx-community/whisper-small-mlx`
-- beam size: `5`
-- Apple Silicon macOS: `mlx-whisper` + Metal GPU + float16
-- Windows/Linux NVIDIA: automatic CUDA preparation and compute-type selection
-- Windows/Linux without NVIDIA: optimized `cpu` + `int8`
-- Intel macOS: CTranslate2 Apple Accelerate optimized CPU backend + `int8`
-
-On Windows and Linux, automatic selection first checks the NVIDIA driver and
-CTranslate2 device capabilities. Initialization installs `nvidia-cublas-cu12`
-and `nvidia-cudnn-cu12` into ListenKit's isolated venv when needed; it does not
-modify a system CUDA installation. Package DLL/shared-library directories are
-injected only into ListenKit child processes. The policy prefers `float16` when
-at least 3072 MiB of dedicated VRAM is free and prefers `int8_float16` below
-that threshold when supported. Older or temporarily memory-constrained NVIDIA
-devices are still attempted with a supported lower-memory compute type instead
-of being rejected from model name, age, or a static VRAM threshold.
-
-ListenKit never installs or changes the NVIDIA system driver. If the driver is
-present, managed CUDA dependencies are prepared by the platform initializer or
-before managed-runtime transcription. Set `LISTENKIT_CUDA_AUTO_PREPARE=0` only
-to disable this behavior deliberately. `doctor` remains read-only and reports
-the driver, managed libraries, devices, compute types, memory, and automatic
-choice.
-
-### Apple Silicon MLX/Metal
-
-On an M-series Mac, automatic mode probes the managed MLX runtime and prepares
-it when needed. A successful probe selects `mlx-whisper` on the Metal GPU. The
-first transcription downloads `mlx-community/whisper-small-mlx`; later runs
-reuse the Hugging Face cache. Use `--engine mlx` to require this path and fail
-clearly if Metal is not ready. Set `LISTENKIT_MLX_MODEL` to another compatible
-MLX Whisper repository only when you intentionally want a different model.
-
-If automatic MLX preparation fails, ListenKit prints the reason and uses
-faster-whisper through CTranslate2's Apple Accelerate CPU backend. Set
-`LISTENKIT_MLX_AUTO_PREPARE=0` only to disable managed preparation deliberately.
-`doctor` is read-only: it reports Apple Silicon, MLX and Metal availability,
-versions, default device, model cache, and the engine that automatic mode would
-select.
-
-Intel Macs use **Apple Accelerate**, an optimized CPU backend. CTranslate2's
-prebuilt macOS wheel does not expose Metal/MPS GPU execution. The optional
-`--engine apple` backend uses Apple's Speech framework, whose hardware
-scheduling is controlled by macOS.
-
-Device controls:
-
-```powershell
-# Safe automatic selection and CPU fallback (default)
-.\cli\transcribe-audio.ps1 --audio-path work\audio\sample.m4a --locale ja-JP --device auto
-
-# Reproducible CPU-only execution
-.\cli\transcribe-audio.ps1 --audio-path work\audio\sample.m4a --locale ja-JP --device cpu
-
-# Require CUDA device 0; failure is reported and never hidden by CPU fallback
-.\cli\transcribe-audio.ps1 --audio-path work\audio\sample.m4a --locale ja-JP --device cuda --device-index 0 --compute-type float16
-```
-
-The same settings can be supplied with `LISTENKIT_ASR_DEVICE`,
-`LISTENKIT_ASR_COMPUTE_TYPE`, and `LISTENKIT_CUDA_DEVICE_INDEX`. Explicit CLI
-arguments take precedence. These device and compute controls apply to
-faster-whisper; MLX always uses Metal. The first run may download the selected
-model and take significantly longer than later cached runs.
-
-Common faster-whisper failures:
-
-- auto-init was not authorized in a non-interactive shell
-- `faster-whisper` is not installed in the selected Python environment
-- model download is blocked or incomplete
-- the audio file is missing or unreadable
-- the selected runtime is not Python 3.14
-- the selected runtime is stored in iCloud Drive
-- the import health check exceeds 60 seconds
-- CUDA preparation failed because the driver, package download, or managed
-  cuBLAS/cuDNN libraries are unavailable
-- every supported CUDA precision failed (for example due to actual OOM), after
-  which automatic mode records the reason and uses CPU
-
-Common MLX failures:
-
-- the Mac is Intel rather than Apple Silicon
-- Metal is unavailable to the process
-- managed dependency or model download is blocked
-- MLX auto-preparation was deliberately disabled
-
-## Apple Speech Backend
-
-Apple Speech is an optional local macOS backend. ListenKit bundles a small helper app that is built on first use and launched through `/usr/bin/open` so macOS can show Speech permission prompts.
-
-The default helper lives at:
-
-```text
-tools/apple-speech-helper/run-apple-speech-helper.sh
-```
-
-Use it with:
+Apple Speech 是可选的本地 macOS backend。ListenKit 首次使用时构建 `tools/apple-speech-helper/` 下的 helper，并通过 `/usr/bin/open` 启动本地 app，以便 macOS 显示 Speech 权限提示。
 
 ```bash
 cli/transcribe-audio.sh --audio-path work/audio/sample.m4a --locale ja-JP --engine apple
 ```
 
-You can still point to an external helper:
+默认 helper：`tools/apple-speech-helper/run-apple-speech-helper.sh`。需要覆盖时：
 
 ```bash
 APPLE_SPEECH_HELPER=/path/to/run-apple-speech-helper.sh \
   cli/transcribe-audio.sh --audio-path work/audio/sample.m4a --locale ja-JP --engine apple
 ```
 
-The helper contract is:
+helper 契约：
 
 ```bash
 run-apple-speech-helper.sh --audio-path <path> --locale <bcp47>
 ```
 
-It must print JSON with:
+它必须打印以下形状的 JSON：
 
 ```json
 {
@@ -285,19 +140,23 @@ It must print JSON with:
 }
 ```
 
-Common Apple Speech failures:
-
-- Speech recognition permission denied
-- macOS version too old for the selected Speech APIs
-- Locale not supported on the current Mac
-- Required speech assets are not installed
-- Audio file path is missing or unreadable
-- Xcode command line tools or the macOS SDK are missing
+常见失败包括 Speech 权限被拒、macOS 版本过旧、locale 不支持、语音资源缺失、音频路径不可读，以及缺少 Xcode command line tools 或 macOS SDK。
 
 ## Audio Hijack
 
-Audio Hijack is optional. Use it to record system or app audio into a local file, then pass that file to:
+Audio Hijack 是可选输入方式。先把系统或应用音频录制为本地文件，再交给 ListenKit：
 
 ```bash
 cli/import-audio.sh --input <recording> --output-dir work/audio
 ```
+
+正常 Agent 集成仍应使用 `generate-markdown` 公共入口；本节低层命令只用于维护和调试。
+
+## 常见失败
+
+- 自动化未授权 `--auto-init`。
+- faster-whisper 未安装、模型下载被阻止、音频缺失或不可读。
+- 运行时不是 Python 3.14，或目标位于 iCloud Drive。
+- 导入健康检查超过 60 秒。
+- CUDA 驱动、下载、cuBLAS/cuDNN 或所有计算类型准备失败。
+- MLX 运行在 Intel Mac、Metal 不可用、下载被阻止或自动准备被禁用。

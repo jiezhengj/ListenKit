@@ -1,22 +1,19 @@
-# Privacy and Copyright
+# 隐私与版权
 
-## Local Processing
+## 本地处理
 
-The default ASR route performs local inference with MLX Whisper on a ready
-Apple Silicon Mac and faster-whisper elsewhere. Audio transcription happens on
-your machine, but the first run may download runtime dependencies and model
-files unless they are already cached locally.
+默认 ASR 路径在可用的 Apple Silicon Mac 上使用 MLX Whisper，其余平台使用 faster-whisper，本地完成推理。首次运行可能下载运行时依赖和模型文件，除非它们已经在本地缓存。
 
-Apple Speech is an optional local backend on macOS. When the Apple helper is used, audio transcription also happens on the local Mac.
+Apple Speech 是 macOS 上可选的本地 backend；使用 Apple helper 时，音频转写同样在本地 Mac 完成。
 
-## AI Editing
+## AI 编辑
 
-The AI editing stage may send transcript text and metadata to the model provider used by your agent or editor. Do not process sensitive audio unless that is acceptable for your environment.
+AI 编辑阶段可能会把转写文本和元数据发送给 Agent 或编辑器所使用的模型服务商。除非你确认当前环境可以处理，否则不要处理敏感音频。
 
-## Copyright
+## 版权
 
-This project does not include copyrighted audio, transcripts, textbook content, or course materials.
+本项目不包含受版权保护的音频、转写稿、教材内容或课程材料。
 
-You are responsible for ensuring you have the right to download, record, transcribe, and study any source material you process.
+你负责确认自己有权下载、录制、转写和学习所处理的源材料。
 
-Do not use this project to redistribute copyrighted transcripts or audio.
+不得使用本项目重新分发受版权保护的转写稿或音频。

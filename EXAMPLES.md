@@ -1,10 +1,10 @@
-# Renderer Fixture Examples
+# 渲染器 fixture 示例
 
-The examples in this repository are synthetic and safe to redistribute.
+仓库中的示例是合成数据，可以安全重新分发。
 
-No sample audio files are bundled. These examples are renderer fixtures for maintainers and use synthetic transcript JSON. They are not the external integration path. External integrations should use `cli/generate-markdown.sh`; see `LLM_INTEGRATION.md`.
+仓库不附带音频文件。这些示例用于维护者测试渲染器，使用合成的 transcript JSON，不是外部集成入口。外部集成应使用 `cli/listenkit.sh generate-markdown`；详见 `LLM_INTEGRATION.md`。
 
-## Japanese Sample
+## 日语示例
 
 ```bash
 cli/render-listening-note.py \
@@ -15,7 +15,7 @@ cli/render-listening-note.py \
   --output examples/sample-note-ja.md
 ```
 
-## English Sample
+## 英语示例
 
 ```bash
 cli/render-listening-note.py \
@@ -26,15 +26,13 @@ cli/render-listening-note.py \
   --output examples/sample-note-en.md
 ```
 
-## Expected Markdown Shape
+## 预期 Markdown 结构
 
-Every rendered Markdown file contains:
+每个渲染后的 Markdown 文件都包含：
 
 - `Source`
 - `Transcript`
 
-The current schema-v1 fixtures also demonstrate actual ASR device and compute
-metadata. These particular synthetic examples use `cpu` + `int8`; real output
-records the backend and accelerator that actually executed.
+当前 schema v1 fixture 还展示实际 ASR 设备和计算元数据。这些合成示例使用 `cpu` + `int8`；真实输出记录实际执行的 backend 和 accelerator。
 
-The renderer does not add learning-analysis sections. Downstream projects can build their own note templates from the transcript JSON or Markdown.
+渲染器不添加学习分析章节。下游项目可以从 transcript JSON 或 Markdown 构建自己的笔记模板。

@@ -15,3 +15,5 @@ tmp/
 *.mp4
 *.mov
 *.webm
+/.spec-kit-governance/
+/.specify/integrations/.cache/

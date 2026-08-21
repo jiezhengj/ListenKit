@@ -1,13 +1,13 @@
 # Audio Hijack
 
-Audio Hijack is an optional capture route for sources that cannot be downloaded directly.
+Audio Hijack 是一种可选的采集方式，适用于无法直接下载的来源。
 
-Recommended workflow:
+推荐流程：
 
-1. Create a session that records the target app or system audio.
-2. Save the recording as WAV, AIFF, M4A, or MP3.
-3. Stop recording after the clip ends.
-4. Generate transcript artifacts from the local file:
+1. 创建一个录制目标应用或系统音频的 session。
+2. 将录音保存为 WAV、AIFF、M4A 或 MP3。
+3. 在片段结束后停止录音。
+4. 从本地文件生成转写产物：
 
 ```bash
 cli/generate-markdown.sh \
@@ -17,6 +17,6 @@ cli/generate-markdown.sh \
   --auto-init
 ```
 
-This writes both `work/my-recording.md` and `work/my-recording.json`.
+这会同时写入 `work/my-recording.md` 和 `work/my-recording.json`。
 
-This project does not automate or configure Audio Hijack in v1.
+本项目 v1 不自动配置或控制 Audio Hijack。
