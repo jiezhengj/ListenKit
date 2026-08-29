@@ -15,3 +15,9 @@
 
 13. If the project already has the runtime-selected context anchor, onboarding may only inject or update the managed loader region; every byte outside that region must be preserved byte-for-byte. Overwriting, deleting, reordering, normalizing, or whole-file formatting is prohibited. If the anchor is absent, create only the exact runtime- or user-supplied path after evidence validation; never guess a filename.
 14. Before `plan-init`, ask the user for the BCP-47 language tag for new or substantially rewritten project documentation. Pass it as `--documentation-language <tag>`. The manager stores the explicit selection in `PROJECT_CONFIG.json` and the selected context-anchor loader; it must not infer a language or mass-translate existing documents.
+
+For an already Spec Kit project that does not install the full governance package, the optional `plan-install-update-reminder` operation can append only its separate managed reminder block to the exact existing context anchor. It requires the installed CLI, an existing `.specify/` directory, and the explicit anchor path; it does not create `docs/spec-kit/**` or modify upstream-owned artifacts.
+
+# After onboarding
+
+Onboarding establishes access to the project rules; it does not authorize or complete any feature work. For substantive work, user approval of a conversational proposal means that the Agent may move into upstream Spec Kit artifact alignment. It does not authorize direct code edits before the current specification, plan, and tasks reflect the approved direction. The Reference package must not modify `.specify/**`, `specs/**`, or native Agent-generated integration files.
