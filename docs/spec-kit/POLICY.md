@@ -2,17 +2,49 @@
 
 GitHub Spec Kit is used for substantive software engineering work. Read-only investigation, explanation, extremely small typo fixes, and very low-risk minor changes do not require the full lifecycle.
 
-# Conversation approval and implementation boundary
+# Governed substantive-work entry
 
-For substantive work, the upstream Spec Kit artifacts are the implementation contract. A conversation, design note, or user message is not itself a spec, plan, task list, or completion record.
+For substantive work, the upstream Spec Kit artifacts and committed project-local review evidence form the implementation contract. A conversation, design note, or user message is not itself a spec, plan, task list, approval record, or completion record.
 
-User approval phrases such as “the plan is acceptable” or “proceed with this approach” approve the discussed direction only. They authorize the Agent to advance that direction into the upstream Spec Kit workflow; this approval does not authorize direct application-code edits that skip artifact alignment.
+Requests to create, design, plan, or implement a substantive Feature, including “按 Spec”, “use Spec Kit”, “form a plan”, or equivalent wording, must enter the governed workflow at Discovery. The Agent must not jump directly to specification, plan, tasks, or application-code changes. It may exempt only read-only investigation, explanation, trivial typo correction, or an extremely small low-risk change, and must state why the exemption applies.
+
+User approval phrases such as “the plan is acceptable” or “proceed with this approach” approve only the review object explicitly identified in the request. This approval does not authorize direct application-code edits that skip artifact alignment or later review gates; it authorizes the Agent only to advance that object into the governed upstream Spec Kit workflow.
 
 When an approved direction is missing from or inconsistent with the current specification, plan, or tasks, the Agent must first use the upstream Spec Kit workflow to update the relevant artifacts. The Reference governance package must never edit `.specify/**`, `specs/**`, or native Agent-generated integration files to enforce this policy.
 
 If the user is only discussing alternatives and has not expressed implementation intent, the Agent must remain in discussion. If implementation intent exists, the Agent may proceed automatically after artifact alignment without requiring the user to repeat “use Spec Kit”.
 
 If implementation reveals a changed requirement, assumption, risk, public contract, data boundary, or affected component, the Agent must pause, update the upstream Spec Kit artifacts, and then resume from the resulting tasks. It must not silently expand the implementation scope.
+
+# Discovery contract
+
+Before upstream specification, inspect the repository for facts and create `docs/spec-kit/features/<feature-id>/DISCOVERY.md`. Cover the business objective and cost of inaction; actors and permissions; primary, alternative, and negative journeys; inputs, outputs, ownership, lifecycle, retention, migration, and deletion; error, empty, loading, partial-failure, retry, and recovery behavior; security, privacy, compliance, accessibility, localization, performance, scale, availability, platforms, external dependencies, scope, non-goals, measurable acceptance, release gates, and required evidence.
+
+Classify each discovery item as `CONFIRMED_FACT`, `USER_DECISION`, `ASSUMPTION_PENDING_APPROVAL`, `OPEN_QUESTION`, `OUT_OF_SCOPE`, or `DEFERRED_WITH_OWNER`. Ask one logical topic per round, investigate repository facts before asking the user, and continue until there is no blocking open question. Recommendations are allowed but never become decisions without user approval. Product behavior, release scope, security exceptions, privacy, and data retention must not be filled from an unstated default.
+
+Specification may begin only when high-impact assumptions are approved or excluded, scope and non-goals are explicit, at least one primary journey has a complete Given/When/Then skeleton, acceptance and failure evidence can be defined, and the user has approved the exact Discovery snapshot.
+
+# Artifact review gates
+
+The required review objects are `DISCOVERY`, `SPECIFICATION`, `PLAN_BUNDLE`, `TASK_PACKAGE`, and `REMEDIATION` when analyze or implementation drift requires artifact changes. Their transitions are:
+
+```text
+DRAFT → REVIEW_REQUESTED → APPROVED → SUPERSEDED
+                    ↘ CHANGES_REQUESTED → DRAFT
+APPROVED + changed artifact hash → STALE
+```
+
+Each request must name the review object, artifact paths, content SHA-256 values, decision summary, open risks, and evidence reference. Store append-only events in `docs/spec-kit/features/<feature-id>/REVIEW_LEDGER.json`; derive current state from events and live artifact hashes. The `docs/spec-kit/features/**` subtree is project-local evidence and must survive governance synchronization byte-for-byte.
+
+An Agent cannot approve on the user's behalf. A checklist pass, validator result, tests, another Agent's self-review, or ambiguous approval without an identified artifact set and hashes is not approval. A changed hash, superseded dependency, `CHANGES_REQUESTED`, or unresolved high-severity analyze finding blocks the next stage. Approval proves only that the identified artifact version was reviewed; it does not prove implementation or validation.
+
+# Tiny-model task readiness
+
+Every implementation task must remain compatible with the upstream checkbox, task ID, story, action, and path format, and must add a self-contained detail block containing one observable objective; traceability; minimum context; preconditions; exact allowed files; read-only references; forbidden changes; inputs and outputs; invariants and edge cases; ordered implementation steps; executable verification with expected results; completion evidence; stop conditions; and downstream handoff.
+
+Split any task with multiple independently verifiable results, mixed lifecycle stages, producer-and-multiple-consumer changes, cross-module work without a prior contract task, no single deterministic verification result, or an unresolved product, architecture, privacy, or security choice. A production change and its focused test may remain one task when together they produce one result.
+
+Before `TASK_PACKAGE` approval, run the read-only readiness validator and an isolated cold-start review. The reviewer receives only a sampled task, its declared read-only references, and repository read access, not the originating conversation. Any `NEEDS_CONTEXT`, `HIDDEN_DECISION`, `CONFLICT`, or `UNVERIFIABLE` result returns the package to `CHANGES_REQUESTED`. A readiness pass proves self-containment, not executor capability.
 
 # Projects and brownfields
 
@@ -34,11 +66,15 @@ Generic is allowed only when the current CLI has no native integration, project 
 
 New projects must use explicit `specify init --here --non-interactive --integration <approved-key>`. If a non-interactive init omits the key, the CLI may select a default product, so the manager must reject that command. In a non-empty brownfield, `--force` may appear only in a dedicated `plan-init`, with rehearsal, a scope snapshot, backup, exact authorization, and failure recovery; no other command may use `--force`.
 
-Substantive work follows:
+Substantive work in governed mode follows:
+
+`discovery → review discovery → specify → clarify → review specification → plan → review plan bundle → checklist → tasks → readiness audit → cold-start review → review task package → analyze → remediation gate when needed → implement → validate → converge → completion review`
+
+This governed sequence preserves the upstream core lifecycle:
 
 `constitution → specify → clarify → plan → checklist → tasks → analyze → implement → validate → converge`
 
-Clarify and checklist may be skipped only when the applicable risk assessment supports the skip and the Agent states the reason. Analyze, validate, and converge are required before substantive completion. Implementation must remain synchronized with the accepted specification, plan, tasks, project constraints, and tests.
+Clarify and checklist are required in governed mode. Analyze, validate, and converge are required before substantive completion. Missing or incompatible companion capability is `COMPANION_CAPABILITY_UNAVAILABLE` and blocks governed work; it never silently weakens the workflow. Implementation must remain synchronized with the accepted specification, plan, tasks, project constraints, hashes, and tests.
 
 # Default and integration coexistence
 

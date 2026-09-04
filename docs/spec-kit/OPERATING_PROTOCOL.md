@@ -14,15 +14,33 @@ Extract the portable artifact to `.spec-kit-governance/staging/<plan-id>/`, vali
 
 For an existing `.specify/` project that intentionally does not carry `docs/spec-kit/**` and does not use a global Policy, `plan-install-update-reminder` may append only the separate Reference-owned update reminder to the exact existing context anchor. It requires the installed `specify` CLI, an existing anchor path supplied by the current Agent runtime or user, and an approved plan. It does not create the governance package, copy the manager, or edit `.specify/**`, `specs/**`, or native Agent integration files. The reminder delegates the check to upstream `specify self check`; it is informational and never runs `specify self upgrade` without explicit user approval.
 
-# Daily Spec Kit feature workflow
+# Daily governed Feature workflow
 
-For substantive feature work, use the upstream Spec Kit artifacts and commands:
+For substantive feature work, use the installed governed companion and upstream Spec Kit artifacts:
 
-`discussion → user direction approved → inspect current artifacts → update spec/plan/tasks through upstream Spec Kit → analyze → implement tasks → validate → converge`
+`discovery → REVIEW_REQUESTED → user decision → specify/clarify → specification review → plan bundle review → checklist/tasks → readiness and cold-start review → task package review → analyze → remediation review when needed → implement → validate → converge → completion review`
 
-Approval phrases such as “the plan is acceptable” authorize advancing the direction into upstream Spec Kit artifact alignment. This approval does not authorize direct application-code edits. If the direction is already represented by the current specification, plan, and tasks, continue from the appropriate upstream handoff; otherwise update those artifacts first.
+At each review gate, show the object type, artifact paths, hashes, concise changes, open risks, and permitted next stage. Record `REVIEW_REQUESTED`, `APPROVED`, `CHANGES_REQUESTED`, and `SUPERSEDED` as append-only events. Derive `STALE` whenever a live artifact hash differs from the approved hash or an upstream review object has been superseded. Never rewrite history to change a decision.
+
+Approval phrases such as “the plan is acceptable” authorize only the review object explicitly named in the request. This approval does not authorize direct application-code edits or approve future objects. If the direction is already represented by current approved artifacts, continue from the corresponding handoff; otherwise revise and request review again.
 
 If the user is only discussing alternatives, do not edit application files. If implementation changes the scope or assumptions, pause and update the upstream artifacts before continuing. The Reference package must not edit `.specify/**`, `specs/**`, or native Agent integration files.
+
+## Pause, resume, and fail-closed rules
+
+- `DRAFT` cannot become `APPROVED` without an intervening `REVIEW_REQUESTED` event.
+- `CHANGES_REQUESTED` resumes at the producing stage after revision, not at implementation.
+- A stale specification invalidates dependent plan and task approvals; a stale plan invalidates task approval.
+- A readiness or cold-start failure returns the task package to revision.
+- High-severity analyze findings require a `REMEDIATION` review before artifact or implementation changes continue.
+- A non-interactive run pauses at every human gate. It must not synthesize approval.
+- Missing companion capability, incompatible CLI range, invalid ledger, unsafe path, or hash mismatch blocks progress with a stable diagnostic.
+
+## Tiny-model task-package handoff
+
+Generate each task as one observable result with all detail fields required by `task-readiness-report.schema.json`. Run only deterministic, read-only checks during audit. Sample at least the configured number of representative tasks for cold-start review, including the highest-risk migration, security, or failure-handling work when present. Any sample other than `EXECUTABLE` makes the package ineligible for approval.
+
+Do not equate `EXECUTABLE` with model routing. If a task still demands advanced reasoning, cross-system authority, or human evidence, keep the self-contained package but route it to a capable executor or human owner.
 
 # Completion semantics
 

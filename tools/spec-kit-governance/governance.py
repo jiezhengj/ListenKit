@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import argparse
 import base64
+import binascii
+import copy
 import hashlib
 import json
 import os
@@ -28,10 +30,10 @@ from typing import Any, Iterable
 
 
 SCHEMA_VERSION = 1
-GOVERNANCE_PACKAGE_VERSION = "1.2.0"
-POLICY_VERSION = "1.2.0"
-REFERENCE_VERSION = "2026.08.28"
-MANAGER_VERSION = "1.2.0"
+GOVERNANCE_PACKAGE_VERSION = "2.0.0"
+POLICY_VERSION = "2.0.0"
+REFERENCE_VERSION = "2026.09.04"
+MANAGER_VERSION = "2.0.0"
 PLAN_TTL = timedelta(minutes=30)
 RUNTIME_DIR = ".spec-kit-governance"
 PROJECT_PACKAGE = "docs/spec-kit"
@@ -51,6 +53,12 @@ MANAGED_ANCHOR_ACTIONS = {
 REFERENCE_UPDATE_SOURCE = Path("governance/project/REFERENCE_UPDATE_CHECK.md")
 GOVERNANCE_LOADER_SOURCE = Path("governance/project/GOVERNANCE_LOADER.md")
 SOURCE_METADATA_SOURCE = Path("governance/release/SOURCE_METADATA.json")
+COMPANION_ROOT = Path("governance/spec-kit-native")
+COMPANION_COMPONENTS = (
+    ("extension", "governance-discovery", Path("extensions/discovery")),
+    ("preset", "tiny-model-tasks", Path("presets/tiny-model-tasks")),
+    ("workflow", "governed-sdd", Path("workflows/governed-sdd")),
+)
 CLI_VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:(\.dev|a|b|rc)(\d+))?$")
 SAFE_RELATIVE = re.compile(r"^[^/\\].*$")
 STATUSES = {
@@ -62,7 +70,19 @@ STATUSES = {
     "UNSUPPORTED_INCOMPATIBLE", "INTEGRATION_CONFLICT", "DEFAULT_CHANGE_FORBIDDEN",
     "CENTRAL_SOURCE_UNVERIFIED", "TARGET_NOT_BOOTSTRAPPED", "TARGET_BASELINE_UNKNOWN", "UP_TO_DATE", "UPDATE_AVAILABLE", "REVIEW_REQUIRED",
     "PROJECT_RULES_PROTECTED", "REFERENCE_OWNERSHIP_VIOLATION", "STATE_BROKEN", "RECOVERY_REQUIRED", "READY_WITH_LIMITATIONS", "READY",
+    "MIGRATION_REQUIRED", "COMPANION_CAPABILITY_UNAVAILABLE", "COMPANION_NOT_INSTALLED",
+    "REVIEW_REQUIRED", "CHANGES_REQUESTED", "APPROVED", "STALE", "TASK_PACKAGE_INVALID",
 }
+
+ARTIFACT_TYPES = {"DISCOVERY", "SPECIFICATION", "PLAN_BUNDLE", "TASK_PACKAGE", "REMEDIATION"}
+REVIEW_DECISIONS = {"REVIEW_REQUESTED", "CHANGES_REQUESTED", "APPROVED", "SUPERSEDED"}
+TASK_REQUIRED_FIELDS = {
+    "id", "objective", "traceability", "context_summary", "preconditions", "allowed_files",
+    "read_only_references", "forbidden_changes", "inputs_outputs", "invariants_and_edge_cases",
+    "implementation_steps", "verification", "completion_evidence", "stop_conditions", "handoff",
+}
+REVIEW_LEDGER_RELATIVE = "docs/spec-kit/features/{feature_id}/REVIEW_LEDGER.json"
+AGENT_REVIEWER_RE = re.compile(r"(?:^|[-_ ])(?:agent|assistant|codex|claude|antigravity|gemini|pi)(?:$|[-_ ])", re.IGNORECASE)
 
 
 class GovernanceError(RuntimeError):
@@ -119,6 +139,16 @@ def validate_plan_shape(plan: dict[str, Any]) -> None:
     if plan.get("operation_type") == "plan-onboard" and plan.get("context_anchor") and not plan.get("anchor_compatibility_evidence"):
         raise GovernanceError("onboarding requires anchor compatibility evidence", "CONTEXT_ANCHOR_UNKNOWN")
     context_anchor = plan.get("context_anchor")
+    if plan.get("operation_type") == "plan-record-artifact-review":
+        mutations = plan.get("manager_file_mutations", [])
+        if len(mutations) != 1 or plan.get("external_cli_mutations"):
+            raise GovernanceError("artifact review plan must append exactly one project-local ledger event", "REFERENCE_OWNERSHIP_VIOLATION")
+        if not re.fullmatch(r"docs/spec-kit/features/[A-Za-z0-9][A-Za-z0-9._-]*/REVIEW_LEDGER\.json", str(mutations[0].get("path"))):
+            raise GovernanceError("artifact review plan targets a non-ledger path", "REFERENCE_OWNERSHIP_VIOLATION")
+    if plan.get("operation_type") in {"plan-upgrade-governance-v2", "plan-install-governed-companion", "plan-remove-governed-companion"}:
+        snapshot = plan.get("source_snapshot")
+        if not isinstance(snapshot, dict) or not re.fullmatch(r"[0-9a-f]{40}", str(snapshot.get("source_revision"))) or not re.fullmatch(r"[0-9a-f]{64}", str(snapshot.get("tree_sha256"))):
+            raise GovernanceError("strict operation plan has no valid source snapshot", "CENTRAL_SOURCE_UNVERIFIED")
     for item in plan.get("manager_file_mutations", []):
         if not isinstance(item.get("path"), str) or not reference_owned_mutation(item["path"], context_anchor):
             raise GovernanceError(
@@ -129,6 +159,12 @@ def validate_plan_shape(plan: dict[str, Any]) -> None:
             raise GovernanceError("malformed manager mutation", "STATE_BROKEN")
         if item.get("expected_new_sha256") and not re.fullmatch(r"[0-9a-f]{64}", item["expected_new_sha256"]):
             raise GovernanceError("malformed manager mutation checksum", "STATE_BROKEN")
+        try:
+            decoded = base64.b64decode(item.get("content_b64", ""), validate=True)
+        except (binascii.Error, ValueError, TypeError) as exc:
+            raise GovernanceError("manager mutation content is not valid base64", "STATE_BROKEN") from exc
+        if item.get("action") not in MANAGED_ANCHOR_ACTIONS and sha256_bytes(decoded) != item.get("expected_new_sha256"):
+            raise GovernanceError("manager mutation content does not match its target checksum", "STATE_BROKEN")
         if item.get("protected_anchor") is True and item.get("path") != context_anchor:
             raise GovernanceError("protected anchor mutation does not match the declared context anchor", "STATE_BROKEN")
         if item.get("path") == context_anchor and (item.get("action") not in MANAGED_ANCHOR_ACTIONS or item.get("protected_anchor") is not True):
@@ -137,8 +173,8 @@ def validate_plan_shape(plan: dict[str, Any]) -> None:
         argv = item.get("argv", [])
         if not argv or argv[0] != "specify":
             raise GovernanceError("external mutation executable is not allowlisted", "UNSUPPORTED_INCOMPATIBLE")
-        if "--force" in argv and plan.get("operation_type") != "plan-init":
-            raise GovernanceError("--force is forbidden outside plan-init", "UNSUPPORTED_INCOMPATIBLE")
+        if "--force" in argv and plan.get("operation_type") not in {"plan-init", "plan-remove-governed-companion"}:
+            raise GovernanceError("--force is forbidden for this operation", "UNSUPPORTED_INCOMPATIBLE")
 
 
 def project_root_from(path: Path | None = None) -> Path:
@@ -286,8 +322,9 @@ def validate_project_package(root: Path) -> list[str]:
         config = read_json(config_path)
         required = {"schema_version", "default_integration", "onboarding", "generic", "catalogs", "context", "documentation", "upgrade", "quality_gates"}
         errors.extend(f"PROJECT_CONFIG missing {name}" for name in sorted(required - set(config)))
-        if config.get("schema_version") != 1:
-            errors.append("PROJECT_CONFIG schema_version must be 1")
+        config_schema = config.get("schema_version")
+        if config_schema not in {1, 2}:
+            errors.append("PROJECT_CONFIG schema_version must be 1 or 2")
         if config.get("default_integration", {}).get("policy") != "pinned":
             errors.append("default integration policy must be pinned")
         if config.get("onboarding", {}).get("allow_unsafe_multi_install") is not False:
@@ -297,6 +334,27 @@ def validate_project_package(root: Path) -> list[str]:
             errors.append("documentation language_tag must be null or a valid BCP 47 tag")
         if (root / ".specify").is_dir() and language_tag is None:
             errors.append("initialized Spec Kit projects require an explicit documentation language")
+        if config_schema == 2:
+            workflow = config.get("workflow_governance")
+            if not isinstance(workflow, dict):
+                errors.append("PROJECT_CONFIG v2 requires workflow_governance")
+            else:
+                if workflow.get("mode") != "governed-sdd-required":
+                    errors.append("PROJECT_CONFIG v2 requires governed-sdd-required mode")
+                expected_reviews = ARTIFACT_TYPES
+                configured_reviews = workflow.get("artifact_reviews")
+                if not isinstance(configured_reviews, list) or set(configured_reviews) != expected_reviews:
+                    errors.append("workflow_governance artifact_reviews must contain every governed artifact type")
+                if workflow.get("approval_evidence") != "committed-project-local":
+                    errors.append("workflow_governance approval_evidence must be committed-project-local")
+                if workflow.get("tiny_model_tasks") != "required":
+                    errors.append("workflow_governance tiny_model_tasks must be required")
+                cold_start = workflow.get("cold_start_review")
+                if not isinstance(cold_start, dict) or cold_start.get("required") is not True or not isinstance(cold_start.get("minimum_samples"), int) or cold_start.get("minimum_samples") < 1:
+                    errors.append("workflow_governance requires at least one cold-start sample")
+            for gate in ("clarify", "checklist", "analyze", "validate", "converge"):
+                if config.get("quality_gates", {}).get(gate) != "required":
+                    errors.append(f"PROJECT_CONFIG v2 quality gate {gate} must be required")
     if adapter_path.is_file():
         registry = read_json(adapter_path)
         if registry.get("schema_version") != 1 or not isinstance(registry.get("anchors"), list) or not isinstance(registry.get("bindings"), list):
@@ -309,9 +367,517 @@ def validate_project_package(root: Path) -> list[str]:
         manifest = read_json(manifest_path)
         required = {"schema_version", "governance_package_version", "policy_version", "reference_version", "source", "specify_compatibility", "paths", "content_sha256", "project_owned_files"}
         errors.extend(f"MANIFEST missing {name}" for name in sorted(required - set(manifest)))
-        if manifest.get("schema_version") != 1:
-            errors.append("MANIFEST schema_version must be 1")
+        if manifest.get("schema_version") not in {1, 2}:
+            errors.append("MANIFEST schema_version must be 1 or 2")
+        if manifest.get("schema_version") == 2:
+            if manifest.get("project_owned_prefixes") != [f"{PROJECT_PACKAGE}/features/"]:
+                errors.append("MANIFEST v2 must preserve the feature evidence prefix")
+            companion = manifest.get("companion")
+            expected_companion = {
+                "version": "2.0.0", "extension": "governance-discovery", "preset": "tiny-model-tasks",
+                "workflow": "governed-sdd", "installation_mode": "independent-native-components",
+            }
+            if companion != expected_companion:
+                errors.append("MANIFEST v2 companion metadata is invalid")
     return errors
+
+
+def governance_generation(root: Path) -> int | None:
+    """Return the committed config generation without treating v1 as corrupt."""
+    config = project_config(root)
+    if config is None:
+        return None
+    value = config.get("schema_version")
+    return value if value in {1, 2} else None
+
+
+def require_governance_v2(root: Path) -> dict[str, Any]:
+    config = project_config(root)
+    if config is None:
+        raise GovernanceError("project governance configuration is missing", "PROJECT_NOT_INITIALIZED")
+    if config.get("schema_version") != 2:
+        raise GovernanceError(
+            "strict feature governance requires an approved v1-to-v2 migration plan",
+            "MIGRATION_REQUIRED",
+        )
+    errors = validate_project_package(root)
+    if errors:
+        raise GovernanceError("project governance v2 configuration is invalid: " + "; ".join(errors), "STATE_BROKEN")
+    return config
+
+
+def feature_locations(root: Path, feature_dir: str) -> dict[str, Any]:
+    """Resolve a feature without guessing outside the two governed roots."""
+    rel = safe_relative(root, feature_dir).as_posix().rstrip("/")
+    parts = Path(rel).parts
+    if len(parts) == 2 and parts[0] == "specs":
+        feature_id = parts[1]
+        spec_rel = rel
+        sidecar_rel = REVIEW_LEDGER_RELATIVE.format(feature_id=feature_id).rsplit("/", 1)[0]
+    elif len(parts) == 4 and parts[:3] == ("docs", "spec-kit", "features"):
+        feature_id = parts[3]
+        sidecar_rel = rel
+        spec_rel = f"specs/{feature_id}"
+    else:
+        raise GovernanceError(
+            "feature directory must be specs/<feature-id> or docs/spec-kit/features/<feature-id>",
+            "STATE_BROKEN",
+        )
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", feature_id):
+        raise GovernanceError("feature ID contains unsupported characters", "STATE_BROKEN")
+    return {
+        "feature_id": feature_id,
+        "spec_rel": spec_rel,
+        "spec_path": root / spec_rel,
+        "sidecar_rel": sidecar_rel,
+        "sidecar_path": root / sidecar_rel,
+        "ledger_rel": f"{sidecar_rel}/REVIEW_LEDGER.json",
+        "ledger_path": root / sidecar_rel / "REVIEW_LEDGER.json",
+    }
+
+
+def validate_review_ledger_object(ledger: dict[str, Any], feature_id: str) -> dict[str, Any]:
+    if ledger.get("schema_version") != 1 or ledger.get("feature_id") != feature_id or not isinstance(ledger.get("events"), list):
+        raise GovernanceError("feature review ledger header is invalid", "STATE_BROKEN")
+    seen: set[str] = set()
+    previous_states: dict[str, str] = {}
+    for event in ledger["events"]:
+        if not isinstance(event, dict):
+            raise GovernanceError("feature review ledger contains a non-object event", "STATE_BROKEN")
+        required = {
+            "event_id", "artifact_type", "decision", "artifact_paths",
+            "content_sha256", "review_summary", "open_risks", "recorded_by", "recorded_at", "evidence",
+            "supersedes_event_id",
+        }
+        if required - set(event):
+            raise GovernanceError("feature review ledger event is missing required fields", "STATE_BROKEN")
+        event_id = event.get("event_id")
+        artifact_type = event.get("artifact_type")
+        decision = event.get("decision")
+        if not isinstance(event_id, str) or not re.fullmatch(r"[a-z0-9][a-z0-9-]*", event_id) or event_id in seen:
+            raise GovernanceError("feature review ledger event_id is invalid or duplicated", "STATE_BROKEN")
+        if artifact_type not in ARTIFACT_TYPES or decision not in REVIEW_DECISIONS:
+            raise GovernanceError("feature review ledger event enum is invalid", "STATE_BROKEN")
+        paths = event.get("artifact_paths")
+        hashes = event.get("content_sha256")
+        if not isinstance(paths, list) or not paths or len(paths) != len(set(paths)) or not isinstance(hashes, dict) or set(paths) != set(hashes):
+            raise GovernanceError("feature review ledger artifact paths and hashes do not match", "STATE_BROKEN")
+        for rel in paths:
+            if not isinstance(rel, str):
+                raise GovernanceError("feature review ledger artifact path is invalid", "STATE_BROKEN")
+            if not re.fullmatch(r"[0-9a-f]{64}", str(hashes.get(rel))):
+                raise GovernanceError("feature review ledger artifact hash is invalid", "STATE_BROKEN")
+        if not isinstance(event.get("recorded_by"), str) or not event["recorded_by"].strip() or not isinstance(event.get("recorded_at"), str):
+            raise GovernanceError("feature review ledger recorder is invalid", "STATE_BROKEN")
+        try:
+            datetime.fromisoformat(event["recorded_at"].replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise GovernanceError("feature review ledger recorded_at is invalid", "STATE_BROKEN") from exc
+        if decision == "APPROVED":
+            if not isinstance(event.get("approved_by"), str) or not event["approved_by"].strip() or not isinstance(event.get("approved_at"), str):
+                raise GovernanceError("APPROVED review event requires approver identity and time", "STATE_BROKEN")
+            try:
+                datetime.fromisoformat(event["approved_at"].replace("Z", "+00:00"))
+            except ValueError as exc:
+                raise GovernanceError("feature review ledger approved_at is invalid", "STATE_BROKEN") from exc
+        supersedes = event.get("supersedes_event_id")
+        if supersedes is not None and supersedes not in seen:
+            raise GovernanceError("review event supersedes an unknown or later event", "STATE_BROKEN")
+        previous = previous_states.get(artifact_type, "DRAFT")
+        allowed = {
+            "DRAFT": {"REVIEW_REQUESTED"},
+            "REVIEW_REQUESTED": {"APPROVED", "CHANGES_REQUESTED"},
+            "CHANGES_REQUESTED": {"REVIEW_REQUESTED"},
+            "APPROVED": {"SUPERSEDED", "REVIEW_REQUESTED"},
+            "SUPERSEDED": {"REVIEW_REQUESTED"},
+        }
+        if decision not in allowed.get(previous, set()):
+            raise GovernanceError(f"invalid review transition for {artifact_type}: {previous} -> {decision}", "STATE_BROKEN")
+        previous_states[artifact_type] = decision
+        seen.add(event_id)
+    return ledger
+
+
+def read_review_ledger(path: Path, feature_id: str, *, missing_ok: bool = True) -> dict[str, Any]:
+    if not path.is_file():
+        if missing_ok:
+            return {"schema_version": 1, "feature_id": feature_id, "events": []}
+        raise GovernanceError("feature review ledger is missing", "REVIEW_REQUIRED")
+    return validate_review_ledger_object(read_json(path), feature_id)
+
+
+def event_artifact_paths(root: Path, locations: dict[str, Any], artifact_type: str, explicit: list[str] | None = None) -> list[str]:
+    if artifact_type not in ARTIFACT_TYPES:
+        raise GovernanceError("unknown artifact type", "STATE_BROKEN")
+    spec_rel = locations["spec_rel"]
+    sidecar_rel = locations["sidecar_rel"]
+    allowed_roots = (spec_rel + "/", sidecar_rel + "/")
+    if explicit:
+        paths = [safe_relative(root, value).as_posix() for value in explicit]
+    elif artifact_type == "DISCOVERY":
+        paths = [f"{sidecar_rel}/DISCOVERY.md"]
+    elif artifact_type == "SPECIFICATION":
+        paths = [f"{spec_rel}/spec.md"]
+    elif artifact_type == "PLAN_BUNDLE":
+        candidates = ["plan.md", "research.md", "data-model.md", "quickstart.md"]
+        paths = [f"{spec_rel}/{name}" for name in candidates if (root / spec_rel / name).is_file()]
+        contracts = root / spec_rel / "contracts"
+        if contracts.is_dir():
+            paths.extend(
+                item.relative_to(root).as_posix()
+                for item in sorted(contracts.rglob("*"))
+                if item.is_file() and not item.is_symlink()
+            )
+    elif artifact_type == "TASK_PACKAGE":
+        candidates = [
+            f"{spec_rel}/tasks.md",
+            f"{sidecar_rel}/TASK_READINESS.json",
+            f"{sidecar_rel}/COLD_START_VALIDATION.json",
+        ]
+        paths = [value for value in candidates if (root / value).is_file()]
+    else:
+        candidates = [f"{sidecar_rel}/REMEDIATION.md", f"{sidecar_rel}/REMEDIATION.json"]
+        paths = [value for value in candidates if (root / value).is_file()]
+    if not paths:
+        raise GovernanceError(f"no artifact files found for {artifact_type}", "REVIEW_REQUIRED")
+    normalized: list[str] = []
+    for rel in paths:
+        rel = safe_relative(root, rel).as_posix()
+        if not any(rel.startswith(prefix) for prefix in allowed_roots):
+            raise GovernanceError("review evidence may bind only this feature's Spec Kit artifacts or sidecar", "REFERENCE_OWNERSHIP_VIOLATION")
+        target = root / rel
+        if not target.is_file() or target.is_symlink():
+            raise GovernanceError(f"review artifact is missing or not a regular file: {rel}", "REVIEW_REQUIRED")
+        normalized.append(rel)
+    required_core = {
+        "DISCOVERY": f"{sidecar_rel}/DISCOVERY.md",
+        "SPECIFICATION": f"{spec_rel}/spec.md",
+        "PLAN_BUNDLE": f"{spec_rel}/plan.md",
+        "TASK_PACKAGE": f"{spec_rel}/tasks.md",
+    }.get(artifact_type)
+    if required_core and required_core not in normalized:
+        raise GovernanceError(f"{artifact_type} review is missing its core artifact: {required_core}", "REVIEW_REQUIRED")
+    return sorted(set(normalized))
+
+
+def current_artifact_approval(root: Path, locations: dict[str, Any], artifact_type: str) -> dict[str, Any]:
+    ledger = read_review_ledger(locations["ledger_path"], locations["feature_id"])
+    matching = [event for event in ledger["events"] if event["artifact_type"] == artifact_type]
+    if not matching:
+        return {"artifact_type": artifact_type, "status": "REVIEW_REQUIRED", "reason": "no review event"}
+    event = matching[-1]
+    decision = event["decision"]
+    stale_paths: list[str] = []
+    for rel, expected in event["content_sha256"].items():
+        safe_relative(root, rel)
+        target = root / rel
+        if not target.is_file() or target.is_symlink() or sha256_file(target) != expected:
+            stale_paths.append(rel)
+    if stale_paths:
+        status = "STALE"
+    elif decision == "APPROVED":
+        status = "APPROVED"
+    elif decision == "CHANGES_REQUESTED":
+        status = "CHANGES_REQUESTED"
+    else:
+        status = "REVIEW_REQUIRED"
+    return {
+        "artifact_type": artifact_type,
+        "status": status,
+        "event_id": event["event_id"],
+        "decision": decision,
+        "artifact_paths": event["artifact_paths"],
+        "stale_paths": stale_paths,
+    }
+
+
+def nonempty_contract_value(value: Any) -> bool:
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, (list, dict)):
+        return bool(value)
+    return value is not None
+
+
+def verify_task_package(root: Path, locations: dict[str, Any]) -> dict[str, Any]:
+    tasks_path = locations["spec_path"] / "tasks.md"
+    report_path = locations["sidecar_path"] / "TASK_READINESS.json"
+    errors: list[str] = []
+    if not tasks_path.is_file():
+        errors.append(f"missing {locations['spec_rel']}/tasks.md")
+    if not report_path.is_file():
+        errors.append(f"missing {locations['sidecar_rel']}/TASK_READINESS.json")
+        return {"status": "TASK_PACKAGE_INVALID", "errors": errors, "tasks": []}
+    report = read_json(report_path)
+    tasks = report.get("tasks")
+    if (
+        report.get("schema_version") != 1
+        or report.get("feature_id") != locations["feature_id"]
+        or report.get("result") != "READY"
+        or not isinstance(report.get("generated_at"), str)
+        or not isinstance(tasks, list)
+        or not tasks
+    ):
+        errors.append("TASK_READINESS.json header or tasks collection is invalid")
+        tasks = []
+    report_paths = report.get("artifact_paths")
+    report_hashes = report.get("content_sha256")
+    if not isinstance(report_paths, list) or not isinstance(report_hashes, dict) or set(report_paths) != set(report_hashes):
+        errors.append("TASK_READINESS.json artifact paths and hashes do not match")
+    else:
+        for rel in report_paths:
+            try:
+                safe_relative(root, rel)
+            except GovernanceError as exc:
+                errors.append(f"TASK_READINESS.json artifact path: {exc}")
+                continue
+            target = root / rel
+            if not target.is_file() or target.is_symlink() or sha256_file(target) != report_hashes.get(rel):
+                errors.append(f"TASK_READINESS.json artifact hash is stale: {rel}")
+    markdown_ids: set[str] = set()
+    if tasks_path.is_file():
+        markdown_ids = set(re.findall(r"(?m)^\s*-\s*\[\s\]\s+(T\d+)\b", tasks_path.read_text(encoding="utf-8")))
+    seen: set[str] = set()
+    dependency_graph: dict[str, set[str]] = {}
+    for index, task in enumerate(tasks):
+        label = f"task[{index}]"
+        if not isinstance(task, dict):
+            errors.append(f"{label} is not an object")
+            continue
+        missing = sorted(field for field in TASK_REQUIRED_FIELDS if field not in task)
+        if missing:
+            errors.append(f"{label} missing fields: {', '.join(missing)}")
+        for field in TASK_REQUIRED_FIELDS - {"read_only_references", "preconditions"}:
+            if field in task and not nonempty_contract_value(task.get(field)):
+                errors.append(f"{label} has empty field: {field}")
+        task_id = task.get("id")
+        if not isinstance(task_id, str) or not re.fullmatch(r"T\d+", task_id):
+            errors.append(f"{label} has invalid id")
+            continue
+        if task_id in seen:
+            errors.append(f"duplicate task id: {task_id}")
+        seen.add(task_id)
+        if task_id not in markdown_ids:
+            errors.append(f"{task_id} is absent from tasks.md checkbox entries")
+        for field in ("allowed_files", "read_only_references"):
+            values = task.get(field)
+            if not isinstance(values, list) or (field == "allowed_files" and not values):
+                errors.append(f"{task_id} {field} must be a list" + (" with at least one path" if field == "allowed_files" else ""))
+                continue
+            for value in values:
+                if not isinstance(value, str):
+                    errors.append(f"{task_id} {field} contains a non-string path")
+                    continue
+                try:
+                    safe_relative(root, value)
+                except GovernanceError as exc:
+                    errors.append(f"{task_id} {field}: {exc}")
+        verification = task.get("verification")
+        if not isinstance(verification, list) or not verification:
+            errors.append(f"{task_id} verification must contain at least one check")
+        else:
+            for check in verification:
+                if not isinstance(check, dict) or check.get("kind") not in {"command", "manual"} or not isinstance(check.get("expected_result"), str) or not check["expected_result"].strip():
+                    errors.append(f"{task_id} has an invalid verification check")
+                elif check.get("kind") == "command" and (not isinstance(check.get("command"), str) or not check["command"].strip()):
+                    errors.append(f"{task_id} command verification is missing its command")
+        dependencies = task.get("depends_on", [])
+        if isinstance(task.get("preconditions"), dict):
+            dependencies = task["preconditions"].get("dependency_task_ids", dependencies)
+        if not isinstance(dependencies, list):
+            errors.append(f"{task_id} dependencies must be a list")
+            dependencies = []
+        dependency_graph[task_id] = {value for value in dependencies if isinstance(value, str) and re.fullmatch(r"T\d+", value)}
+    for task_id, dependencies in dependency_graph.items():
+        unknown = sorted(dependencies - seen)
+        if unknown:
+            errors.append(f"{task_id} depends on unknown tasks: {', '.join(unknown)}")
+    visiting: set[str] = set()
+    visited: set[str] = set()
+
+    def visit(task_id: str) -> None:
+        if task_id in visiting:
+            errors.append(f"dependency cycle includes {task_id}")
+            return
+        if task_id in visited:
+            return
+        visiting.add(task_id)
+        for dependency in dependency_graph.get(task_id, set()):
+            visit(dependency)
+        visiting.remove(task_id)
+        visited.add(task_id)
+
+    for task_id in sorted(seen):
+        visit(task_id)
+    return {
+        "status": "READY" if not errors else "TASK_PACKAGE_INVALID",
+        "feature_id": locations["feature_id"],
+        "task_count": len(tasks),
+        "task_ids": sorted(seen),
+        "errors": errors,
+    }
+
+
+def verify_cold_start(root: Path, locations: dict[str, Any], task_result: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
+    path = locations["sidecar_path"] / "COLD_START_VALIDATION.json"
+    if not path.is_file():
+        return {"status": "CHANGES_REQUESTED", "errors": ["cold-start validation is missing"]}
+    report = read_json(path)
+    samples = report.get("reviews", report.get("samples"))
+    errors: list[str] = []
+    if (
+        report.get("schema_version") != 1
+        or report.get("feature_id") != locations["feature_id"]
+        or report.get("result") != "EXECUTABLE"
+        or not isinstance(report.get("generated_at"), str)
+        or not isinstance(samples, list)
+    ):
+        errors.append("cold-start validation header or reviews collection is invalid")
+        samples = []
+    isolation = report.get("isolation")
+    if not isinstance(isolation, dict) or isolation.get("originating_conversation_provided") is not False or isolation.get("repository_access") != "read-only" or isolation.get("supplied_context") != "declared-task-and-references-only":
+        errors.append("cold-start validation did not use the required isolation model")
+    readiness_path = locations["sidecar_path"] / "TASK_READINESS.json"
+    if readiness_path.is_file() and report.get("task_package_sha256") != sha256_file(readiness_path):
+        errors.append("cold-start validation targets a stale task package")
+    configured_minimum = config.get("workflow_governance", {}).get("cold_start_review", {}).get("minimum_samples", 3)
+    required_samples = min(configured_minimum, max(task_result.get("task_count", 0), 1))
+    if report.get("minimum_samples") is not None and (not isinstance(report.get("minimum_samples"), int) or report.get("minimum_samples") < required_samples):
+        errors.append("cold-start report minimum_samples is below the governed requirement")
+    if len(samples) < required_samples:
+        errors.append(f"cold-start validation requires at least {required_samples} samples")
+    task_ids = set(task_result.get("task_ids", []))
+    sampled: set[str] = set()
+    for index, sample in enumerate(samples):
+        if not isinstance(sample, dict):
+            errors.append(f"cold-start sample[{index}] is not an object")
+            continue
+        task_id = sample.get("task_id")
+        verdict = sample.get("classification", sample.get("verdict", sample.get("result")))
+        if task_id not in task_ids:
+            errors.append(f"cold-start sample[{index}] references an unknown task")
+        if task_id in sampled:
+            errors.append(f"cold-start task sampled more than once: {task_id}")
+        if isinstance(task_id, str):
+            sampled.add(task_id)
+        if verdict != "EXECUTABLE":
+            errors.append(f"cold-start sample {task_id or index} is {verdict or 'missing-verdict'}")
+    return {"status": "READY" if not errors else "CHANGES_REQUESTED", "sample_count": len(samples), "required_samples": required_samples, "errors": errors}
+
+
+def audit_feature_readiness(root: Path, feature_dir: str) -> dict[str, Any]:
+    config = require_governance_v2(root)
+    locations = feature_locations(root, feature_dir)
+    ledger = read_review_ledger(locations["ledger_path"], locations["feature_id"])
+    approvals = [current_artifact_approval(root, locations, artifact) for artifact in ("DISCOVERY", "SPECIFICATION", "PLAN_BUNDLE", "TASK_PACKAGE")]
+    event_positions = {event["event_id"]: index for index, event in enumerate(ledger["events"])}
+    prior_approval_position = -1
+    for approval in approvals:
+        position = event_positions.get(approval.get("event_id"), -1)
+        if approval["status"] == "APPROVED" and position < prior_approval_position:
+            approval["status"] = "STALE"
+            approval["reason"] = "an upstream review object was approved more recently"
+        if approval["status"] == "APPROVED":
+            prior_approval_position = position
+    remediation_present = any(
+        event.get("artifact_type") == "REMEDIATION"
+        for event in ledger["events"]
+    ) or (locations["sidecar_path"] / "REMEDIATION.md").is_file() or (locations["sidecar_path"] / "REMEDIATION.json").is_file()
+    if remediation_present:
+        approvals.append(current_artifact_approval(root, locations, "REMEDIATION"))
+    task_result = verify_task_package(root, locations)
+    cold_start = verify_cold_start(root, locations, task_result, config)
+    blocked = [item for item in approvals if item["status"] != "APPROVED"]
+    if task_result["status"] != "READY" or cold_start["status"] != "READY":
+        status = "CHANGES_REQUESTED"
+    elif blocked:
+        status = "REVIEW_REQUIRED"
+    else:
+        status = "READY"
+    return {
+        "schema_version": 1,
+        "status": status,
+        "feature_id": locations["feature_id"],
+        "governance_generation": 2,
+        "approvals": approvals,
+        "task_package": task_result,
+        "cold_start_validation": cold_start,
+        "implement_allowed": status == "READY",
+    }
+
+
+def artifact_review_mutation(root: Path, args: argparse.Namespace) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Build exactly one append-only ledger event from explicit operator input."""
+    require_governance_v2(root)
+    locations = feature_locations(root, args.feature_dir)
+    artifact_type = args.artifact_type
+    decision = args.decision
+    reviewer = args.reviewer.strip()
+    if not reviewer or AGENT_REVIEWER_RE.search(reviewer):
+        raise GovernanceError("reviewer must identify the human reviewer, not an Agent", "REVIEW_REQUIRED")
+    if not args.evidence.strip() or not args.review_summary.strip():
+        raise GovernanceError("review evidence and summary must be explicit and non-empty", "REVIEW_REQUIRED")
+    ledger = read_review_ledger(locations["ledger_path"], locations["feature_id"])
+    prior = [event for event in ledger["events"] if event["artifact_type"] == artifact_type]
+    previous = prior[-1] if prior else None
+    paths = event_artifact_paths(root, locations, artifact_type, args.artifact_path)
+    hashes = {rel: sha256_file(root / rel) for rel in paths}
+    if decision in {"APPROVED", "CHANGES_REQUESTED"}:
+        if previous is None or previous["decision"] != "REVIEW_REQUESTED":
+            raise GovernanceError(f"{decision} requires the immediately preceding REVIEW_REQUESTED event", "REVIEW_REQUIRED")
+        if previous["artifact_paths"] != paths or previous["content_sha256"] != hashes:
+            raise GovernanceError("reviewed artifact content changed after the review request", "STALE")
+    if decision == "SUPERSEDED" and (previous is None or previous["decision"] != "APPROVED"):
+        raise GovernanceError("SUPERSEDED requires the immediately preceding APPROVED event", "STATE_BROKEN")
+    supersedes = args.supersedes_event_id
+    if decision == "SUPERSEDED":
+        supersedes = supersedes or previous["event_id"]
+    elif supersedes is not None:
+        raise GovernanceError("supersedes_event_id is valid only for SUPERSEDED", "STATE_BROKEN")
+    recorded_at = iso(utc_now())
+    event: dict[str, Any] = {
+        "event_id": uuid.uuid4().hex,
+        "artifact_type": artifact_type,
+        "decision": decision,
+        "artifact_paths": paths,
+        "content_sha256": hashes,
+        "review_summary": args.review_summary.strip(),
+        "open_risks": list(args.open_risk or []),
+        "recorded_by": reviewer,
+        "recorded_at": recorded_at,
+        "evidence": args.evidence.strip(),
+        "supersedes_event_id": supersedes,
+    }
+    if decision == "APPROVED":
+        event["approved_by"] = reviewer
+        event["approved_at"] = recorded_at
+    updated = {**ledger, "events": [*ledger["events"], event]}
+    validate_review_ledger_object(updated, locations["feature_id"])
+    mutation = file_mutation(root, locations["ledger_rel"], canonical_json(updated) + b"\n", "replace")
+    return mutation, event
+
+
+def validate_review_append_at_apply(root: Path, plan: dict[str, Any]) -> None:
+    if plan.get("operation_type") != "plan-record-artifact-review":
+        return
+    mutations = plan.get("manager_file_mutations", [])
+    if len(mutations) != 1 or plan.get("external_cli_mutations"):
+        raise GovernanceError("artifact review plan must contain exactly one local ledger mutation", "REFERENCE_OWNERSHIP_VIOLATION")
+    item = mutations[0]
+    match = re.fullmatch(r"docs/spec-kit/features/([A-Za-z0-9][A-Za-z0-9._-]*)/REVIEW_LEDGER\.json", str(item.get("path")))
+    if not match:
+        raise GovernanceError("artifact review plan targets a non-ledger path", "REFERENCE_OWNERSHIP_VIOLATION")
+    try:
+        content = base64.b64decode(item["content_b64"], validate=True)
+        updated = json.loads(content)
+    except (KeyError, ValueError, json.JSONDecodeError) as exc:
+        raise GovernanceError("artifact review plan contains an invalid ledger payload", "STATE_BROKEN") from exc
+    if not isinstance(updated, dict):
+        raise GovernanceError("artifact review ledger payload must be an object", "STATE_BROKEN")
+    current = read_review_ledger(root / item["path"], match.group(1))
+    validate_review_ledger_object(updated, match.group(1))
+    if len(updated["events"]) != len(current["events"]) + 1 or updated["events"][:-1] != current["events"]:
+        raise GovernanceError("artifact review plan may only append one event", "REFERENCE_OWNERSHIP_VIOLATION")
 
 
 def cli_compatibility(root: Path) -> str:
@@ -558,6 +1124,73 @@ def reviewed_upstream_revision(source: Path) -> str | None:
     return str(metadata_baseline) if re.fullmatch(r"[0-9a-f]{40}", str(metadata_baseline)) else None
 
 
+def strict_source_snapshot(source_value: str | None) -> dict[str, Any]:
+    """Verify a clean v2 source and bind every migration/companion input byte."""
+    if not source_value or not Path(source_value).is_absolute():
+        raise GovernanceError("strict governance operations require an absolute --source", "CENTRAL_SOURCE_UNVERIFIED")
+    source = source_root(source_value)
+    revision = source_revision(source)
+    if revision is None:
+        raise GovernanceError("strict governance source has no verifiable revision", "CENTRAL_SOURCE_UNVERIFIED")
+    if (source / ".git").exists() and git_value(source, "status", "--porcelain=v1", "--untracked-files=all"):
+        raise GovernanceError("strict governance source worktree is not clean", "CENTRAL_SOURCE_UNVERIFIED")
+    default_config_path = source / "governance/project/PROJECT_CONFIG.default.json"
+    if not default_config_path.is_file() or read_json(default_config_path).get("schema_version") != 2:
+        raise GovernanceError("strict governance source does not contain PROJECT_CONFIG v2", "CENTRAL_SOURCE_UNVERIFIED")
+    if source_version(source, "GOVERNANCE_PACKAGE_VERSION", None) != "2.0.0" or source_version(source, "MANAGER_VERSION", None) != "2.0.0":
+        raise GovernanceError("strict governance source is not the reviewed 2.0.0 generation", "CENTRAL_SOURCE_UNVERIFIED")
+    required = [
+        Path("governance/project/PROJECT_CONFIG.default.json"),
+        Path("governance/manager/speckit_governance.py"),
+        COMPANION_ROOT / "extensions/discovery/extension.yml",
+        COMPANION_ROOT / "presets/tiny-model-tasks/preset.yml",
+        COMPANION_ROOT / "workflows/governed-sdd/workflow.yml",
+    ]
+    for relative in required:
+        if not (source / relative).is_file():
+            raise GovernanceError(f"strict governance source is missing {relative.as_posix()}", "CENTRAL_SOURCE_UNVERIFIED")
+    files = {
+        path.relative_to(source).as_posix(): sha256_file(path)
+        for path in sorted((source / "governance").rglob("*"))
+        if path.is_file() and not path.is_symlink()
+    }
+    return {
+        "source_root": str(source),
+        "source_revision": revision,
+        "tree_sha256": sha256_bytes(canonical_json(files)),
+        "files": files,
+    }
+
+
+def validate_strict_source_snapshot(snapshot: dict[str, Any] | None) -> None:
+    if not isinstance(snapshot, dict) or not isinstance(snapshot.get("source_root"), str) or not Path(snapshot["source_root"]).is_absolute():
+        raise GovernanceError("strict source snapshot is missing", "CENTRAL_SOURCE_UNVERIFIED")
+    current = strict_source_snapshot(snapshot["source_root"])
+    if current != snapshot:
+        raise GovernanceError("strict governance source changed after plan creation", "CENTRAL_SOURCE_UNVERIFIED")
+
+
+def migration_binding_payload(plan_fields: dict[str, Any], record: dict[str, Any]) -> dict[str, Any]:
+    """Canonical non-circular binding between a migration record and its plan."""
+    return {
+        "algorithm": "sha256-canonical-json-v1",
+        "operation_type": plan_fields["operation_type"],
+        "plan_id": plan_fields["plan_id"],
+        "project_root_fingerprint": plan_fields["project_root_fingerprint"],
+        "git_head": plan_fields["git_head"],
+        "git_status_porcelain_sha256": plan_fields["git_status_porcelain_sha256"],
+        "source_revision": record["source_revision"],
+        "config_sha256_before": record["config_sha256_before"],
+        "config_sha256_after": record["config_sha256_after"],
+        "backup_inventory": record["backup_inventory"],
+        "preserved_subtrees": record["preserved_subtrees"],
+    }
+
+
+def migration_binding_sha256(plan_fields: dict[str, Any], record: dict[str, Any]) -> str:
+    return sha256_bytes(canonical_json(migration_binding_payload(plan_fields, record)))
+
+
 def preflight_writable(root: Path, rel: str) -> dict[str, Any]:
     safe_relative(root, rel)
     target = root / rel
@@ -683,6 +1316,13 @@ def governance_update_mutations(root: Path, source: Path, context_anchor: str | 
         manifest["policy_version"] = source_version(source, "POLICY_VERSION", manifest.get("policy_version"))
         manifest["reference_version"] = source_version(source, "REFERENCE_VERSION", manifest.get("reference_version"))
         manifest["manager_version"] = source_version(source, "MANAGER_VERSION", manifest.get("manager_version"))
+        if manifest["governance_package_version"] == "2.0.0":
+            manifest["specify_compatibility"] = {
+                "minimum_version": "1.0.4",
+                "tested_version": "1.0.4",
+                "maximum_version_exclusive": None,
+                "approved_install_ref": manifest.get("source", {}).get("reviewed_upstream_revision") or reviewed_upstream_revision(source),
+            }
         manifest["source"] = manifest.get("source", {})
         source_revision_value = source_revision(source)
         if source_revision_value is None:
@@ -704,6 +1344,141 @@ def governance_update_mutations(root: Path, source: Path, context_anchor: str | 
             "append-managed-bootstrap",
             protected_anchor=True,
         ))
+    return mutations
+
+
+def governance_v2_upgrade_mutations(root: Path, source_snapshot: dict[str, Any], plan_id: str) -> tuple[list[dict[str, Any]], str]:
+    current_config = project_config(root)
+    if current_config is None or current_config.get("schema_version") != 1:
+        raise GovernanceError("v2 migration requires an existing PROJECT_CONFIG v1", "MIGRATION_REQUIRED")
+    current_manifest_path = root / PROJECT_PACKAGE / "MANIFEST.json"
+    if not current_manifest_path.is_file():
+        raise GovernanceError("v2 migration requires the reviewed 1.3.0 bridge manifest", "MIGRATION_REQUIRED")
+    current_manifest = read_json(current_manifest_path)
+    if current_manifest.get("governance_package_version") != "1.3.0" or current_manifest.get("manager_version") != "1.3.0":
+        raise GovernanceError("v2 migration is allowed only from the verified 1.3.0 bridge", "MIGRATION_REQUIRED")
+    source = Path(source_snapshot["source_root"])
+    strict_defaults = read_json(source / "governance/project/PROJECT_CONFIG.default.json")
+    migrated_config = copy.deepcopy(current_config)
+    migrated_config["schema_version"] = 2
+    migrated_config["quality_gates"] = copy.deepcopy(strict_defaults["quality_gates"])
+    migrated_config["workflow_governance"] = copy.deepcopy(strict_defaults["workflow_governance"])
+    config_bytes = canonical_json(migrated_config) + b"\n"
+    config_mutation = file_mutation(root, f"{PROJECT_PACKAGE}/PROJECT_CONFIG.json", config_bytes, "replace")
+
+    baseline_mutations = governance_update_mutations(root, source, None)
+    baseline_mutations = [item for item in baseline_mutations if item["path"] != f"{PROJECT_PACKAGE}/MANIFEST.json"]
+    mutations = [*baseline_mutations, config_mutation]
+    original_paths: dict[str, str] = {}
+    for item in mutations:
+        if item.get("old_sha256") is not None:
+            original_paths[item["path"]] = item["old_sha256"]
+    manifest_path = current_manifest_path
+    if not manifest_path.is_file():
+        raise GovernanceError("v2 migration requires an existing governance manifest", "PROJECT_NOT_INITIALIZED")
+    original_paths[f"{PROJECT_PACKAGE}/MANIFEST.json"] = sha256_file(manifest_path)
+    backup_inventory = [{"path": path, "sha256": digest} for path, digest in sorted(original_paths.items())]
+    migration_id = "migration-" + uuid.uuid4().hex
+    migration_rel = f"{PROJECT_PACKAGE}/evidence/{migration_id}.json"
+    fingerprint = git_fingerprint(root)
+    record: dict[str, Any] = {
+        "schema_version": 1,
+        "migration_id": migration_id,
+        "from_project_config_version": 1,
+        "to_project_config_version": 2,
+        "created_at": iso(utc_now()),
+        "plan_id": plan_id,
+        "plan_binding_sha256": "",
+        "source_revision": source_snapshot["source_revision"],
+        "config_sha256_before": sha256_file(root / PROJECT_PACKAGE / "PROJECT_CONFIG.json"),
+        "config_sha256_after": config_mutation["expected_new_sha256"],
+        "backup_inventory": backup_inventory,
+        "preserved_subtrees": [".specify", "docs/spec-kit/features", "specs"],
+        "rollback_journal": [
+            {"sequence": index, "action": "RESTORE", "path": item["path"], "expected_sha256": item["sha256"]}
+            for index, item in enumerate(backup_inventory, 1)
+        ] + [{"sequence": len(backup_inventory) + 1, "action": "VERIFY_PRESERVED", "path": "docs/spec-kit/features", "expected_sha256": tree_digest(root, "docs/spec-kit/features")}],
+        "status": "APPLIED",
+    }
+    binding_fields = {"operation_type": "plan-upgrade-governance-v2", "plan_id": plan_id, **fingerprint}
+    record["plan_binding_sha256"] = migration_binding_sha256(binding_fields, record)
+    record_mutation = file_mutation(root, migration_rel, canonical_json(record) + b"\n")
+    mutations.append(record_mutation)
+
+    manifest = read_json(manifest_path)
+    manifest["schema_version"] = 2
+    manifest["governance_package_version"] = "2.0.0"
+    manifest["policy_version"] = source_version(source, "POLICY_VERSION", "2.0.0")
+    manifest["reference_version"] = source_version(source, "REFERENCE_VERSION", REFERENCE_VERSION)
+    manifest["manager_version"] = "2.0.0"
+    manifest["specify_compatibility"] = {
+        "minimum_version": "1.0.4",
+        "tested_version": "1.0.4",
+        "maximum_version_exclusive": None,
+        "approved_install_ref": manifest.get("source", {}).get("reviewed_upstream_revision") or reviewed_upstream_revision(source),
+    }
+    manifest.setdefault("source", {})["revision"] = source_snapshot["source_revision"]
+    manifest["source"]["release"] = "v2.0.0"
+    manifest["project_owned_prefixes"] = [f"{PROJECT_PACKAGE}/features/"]
+    manifest["companion"] = {
+        "version": "2.0.0",
+        "extension": "governance-discovery",
+        "preset": "tiny-model-tasks",
+        "workflow": "governed-sdd",
+        "installation_mode": "independent-native-components",
+    }
+    for item in mutations:
+        manifest.setdefault("content_sha256", {})[item["path"]] = item["expected_new_sha256"]
+    manifest_mutation = file_mutation(root, f"{PROJECT_PACKAGE}/MANIFEST.json", canonical_json(manifest) + b"\n", "replace")
+    mutations.append(manifest_mutation)
+    return mutations, migration_rel
+
+
+def verified_migration_record(root: Path, record_rel: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    rel = safe_relative(root, record_rel).as_posix()
+    if not re.fullmatch(r"docs/spec-kit/evidence/migration-[a-f0-9]+\.json", rel):
+        raise GovernanceError("migration record path is outside the governed evidence directory", "REFERENCE_OWNERSHIP_VIOLATION")
+    record = read_json(root / rel)
+    original_plan_path = root / RUNTIME_DIR / "plans" / f"{record.get('plan_id')}.json"
+    original_plan = load_plan(root, original_plan_path)
+    if original_plan.get("operation_type") != "plan-upgrade-governance-v2":
+        raise GovernanceError("migration record does not reference a v2 upgrade plan", "STATE_BROKEN")
+    if record.get("source_revision") != (original_plan.get("source_snapshot") or {}).get("source_revision"):
+        raise GovernanceError("migration record source revision does not match its plan", "STATE_BROKEN")
+    if migration_binding_sha256(original_plan, record) != record.get("plan_binding_sha256"):
+        raise GovernanceError("migration record plan binding is invalid", "STATE_BROKEN")
+    return record, original_plan
+
+
+def governance_v2_rollback_mutations(root: Path, record_rel: str) -> list[dict[str, Any]]:
+    record, original_plan = verified_migration_record(root, record_rel)
+    if record.get("status") != "APPLIED" or governance_generation(root) != 2:
+        raise GovernanceError("v2 rollback requires an applied migration and active PROJECT_CONFIG v2", "STATE_BROKEN")
+    config_path = root / PROJECT_PACKAGE / "PROJECT_CONFIG.json"
+    if not config_path.is_file() or sha256_file(config_path) != record.get("config_sha256_after"):
+        raise GovernanceError("PROJECT_CONFIG changed after migration; rollback requires review", "RECOVERY_REQUIRED")
+    allowed_restore = {
+        f"{PROJECT_PACKAGE}/START_HERE.md", f"{PROJECT_PACKAGE}/POLICY.md", f"{PROJECT_PACKAGE}/REFERENCE.md",
+        f"{PROJECT_PACKAGE}/OPERATING_PROTOCOL.md", f"{PROJECT_PACKAGE}/AGENT_ONBOARDING.md",
+        f"{PROJECT_PACKAGE}/PROJECT_CONFIG.json", f"{PROJECT_PACKAGE}/MANIFEST.json", MANAGER_RELATIVE,
+    }
+    backup_dir = root / RUNTIME_DIR / "backups" / original_plan["plan_id"]
+    mutations: list[dict[str, Any]] = []
+    inventory = {item["path"]: item["sha256"] for item in record.get("backup_inventory", []) if isinstance(item, dict)}
+    for entry in record.get("rollback_journal", []):
+        if entry.get("action") != "RESTORE":
+            continue
+        rel = entry.get("path")
+        if rel not in allowed_restore or inventory.get(rel) != entry.get("expected_sha256"):
+            raise GovernanceError("migration rollback journal attempts to restore an unowned path", "REFERENCE_OWNERSHIP_VIOLATION")
+        backup = backup_dir / (rel.replace("/", "__") + ".bak")
+        if not backup.is_file() or sha256_file(backup) != entry["expected_sha256"]:
+            raise GovernanceError(f"verified migration backup is missing or changed: {rel}", "RECOVERY_REQUIRED")
+        mutations.append(file_mutation(root, rel, backup.read_bytes(), "replace"))
+    if set(inventory) != {item["path"] for item in mutations}:
+        raise GovernanceError("migration backup inventory and rollback mutations differ", "STATE_BROKEN")
+    rolled_back = {**record, "status": "ROLLED_BACK"}
+    mutations.append(file_mutation(root, safe_relative(root, record_rel).as_posix(), canonical_json(rolled_back) + b"\n", "replace"))
     return mutations
 
 
@@ -743,7 +1518,7 @@ def activate_binding_mutations(root: Path, runtime_id: str, key: str, evidence_r
     return mutations
 
 
-def make_plan(root: Path, operation: str, mutations: list[dict[str, Any]], *, external: list[dict[str, Any]] | None = None, identity: dict[str, Any] | None = None, claimed_key: str | None = None, context_anchor: str | None = None, write_preflight: list[dict[str, Any]] | None = None, anchor_compatibility_evidence: list[dict[str, Any]] | None = None, rehearsal: dict[str, Any] | None = None, documentation_language: str | None = None) -> dict[str, Any]:
+def make_plan(root: Path, operation: str, mutations: list[dict[str, Any]], *, external: list[dict[str, Any]] | None = None, identity: dict[str, Any] | None = None, claimed_key: str | None = None, context_anchor: str | None = None, write_preflight: list[dict[str, Any]] | None = None, anchor_compatibility_evidence: list[dict[str, Any]] | None = None, rehearsal: dict[str, Any] | None = None, documentation_language: str | None = None, plan_id: str | None = None, source_snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
     now = utc_now()
     config_path = root / PROJECT_PACKAGE / "PROJECT_CONFIG.json"
     manifest_path = root / PROJECT_PACKAGE / "MANIFEST.json"
@@ -752,7 +1527,7 @@ def make_plan(root: Path, operation: str, mutations: list[dict[str, Any]], *, ex
     status = command_status(root)
     plan: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
-        "plan_id": uuid.uuid4().hex,
+        "plan_id": plan_id or uuid.uuid4().hex,
         "operation_type": operation,
         "created_at": iso(now),
         "expires_at": iso(now + PLAN_TTL),
@@ -778,6 +1553,7 @@ def make_plan(root: Path, operation: str, mutations: list[dict[str, Any]], *, ex
         "anchor_compatibility_evidence": anchor_compatibility_evidence or [],
         "documentation_language": documentation_language,
         "rehearsal": rehearsal,
+        "source_snapshot": source_snapshot,
         "capability_inventory_before": runtime_capability_inventory(root),
         "manager_file_mutations": mutations,
         "external_cli_mutations": external or [],
@@ -836,7 +1612,7 @@ def bootstrap_mutations(root: Path, source: Path, context_anchor: str) -> list[d
         raise GovernanceError("governance bootstrap source has no reviewed upstream baseline", "CENTRAL_SOURCE_UNVERIFIED")
     tested_cli = cli_version() or "0.0.0"
     manifest_content = {
-        "schema_version": 1,
+        "schema_version": 2,
         "governance_package_version": source_version(source, "GOVERNANCE_PACKAGE_VERSION", GOVERNANCE_PACKAGE_VERSION),
         "policy_version": source_version(source, "POLICY_VERSION", POLICY_VERSION),
         "reference_version": source_version(source, "REFERENCE_VERSION", REFERENCE_VERSION),
@@ -851,6 +1627,14 @@ def bootstrap_mutations(root: Path, source: Path, context_anchor: str) -> list[d
         },
         "content_sha256": {},
         "project_owned_files": [f"{PROJECT_PACKAGE}/LOCAL_OVERRIDES.md", f"{PROJECT_PACKAGE}/PROJECT_CONFIG.json", f"{PROJECT_PACKAGE}/ADAPTERS.json"],
+        "project_owned_prefixes": [f"{PROJECT_PACKAGE}/features/"],
+        "companion": {
+            "version": "2.0.0",
+            "extension": "governance-discovery",
+            "preset": "tiny-model-tasks",
+            "workflow": "governed-sdd",
+            "installation_mode": "independent-native-components",
+        },
         "portable_anchor": {"path": context_anchor, "marker_start": START_MARKER, "marker_end": END_MARKER},
     }
     for item in mutations:
@@ -888,6 +1672,133 @@ def cmd_doctor(root: Path) -> dict[str, Any]:
         result["install_suggestion"] = "uv tool install specify-cli --from git+https://github.com/github/spec-kit.git"
     if (root / PROJECT_PACKAGE / "PROJECT_CONFIG.json").is_file():
         result["project_config"] = project_config(root)
+        result["governance_generation"] = governance_generation(root)
+        result["strict_feature_governance"] = "READY" if governance_generation(root) == 2 else "MIGRATION_REQUIRED"
+    return result
+
+
+def companion_status(root: Path) -> dict[str, Any]:
+    generation = governance_generation(root)
+    if generation != 2:
+        return {"status": "MIGRATION_REQUIRED", "governance_generation": generation}
+    executable = shutil.which("specify")
+    if not executable:
+        return {"status": "CLI_MISSING", "governance_generation": generation}
+    capabilities: dict[str, Any] = {}
+    expected = {"workflow": "governed-sdd", "preset": "tiny-model-tasks", "extension": "governance-discovery"}
+    unavailable: list[str] = []
+    missing: list[str] = []
+    for capability, artifact_id in expected.items():
+        help_result = subprocess.run(
+            [executable, capability, "--help"], cwd=root, text=True, encoding="utf-8", errors="replace",
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+        )
+        if help_result.returncode != 0 or "list" not in (help_result.stdout + help_result.stderr):
+            capabilities[capability] = {"available": False, "installed": False}
+            unavailable.append(capability)
+            continue
+        list_result = subprocess.run(
+            [executable, capability, "list", "--json"], cwd=root, text=True, encoding="utf-8", errors="replace",
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+        )
+        if list_result.returncode != 0:
+            list_result = subprocess.run(
+                [executable, capability, "list"], cwd=root, text=True, encoding="utf-8", errors="replace",
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+            )
+        output = list_result.stdout + list_result.stderr
+        installed = list_result.returncode == 0 and re.search(rf"(?<![A-Za-z0-9._-]){re.escape(artifact_id)}(?![A-Za-z0-9._-])", output) is not None
+        capabilities[capability] = {
+            "available": list_result.returncode == 0,
+            "installed": installed,
+            "expected_id": artifact_id,
+            "inventory_sha256": sha256_bytes(output.encode("utf-8")),
+        }
+        if list_result.returncode != 0:
+            unavailable.append(capability)
+        elif not installed:
+            missing.append(capability)
+    if unavailable:
+        status = "COMPANION_CAPABILITY_UNAVAILABLE"
+    elif missing:
+        status = "COMPANION_NOT_INSTALLED"
+    else:
+        status = "READY"
+    return {"status": status, "governance_generation": generation, "capabilities": capabilities, "missing": missing, "unavailable": unavailable}
+
+
+def require_companion_cli_contract(root: Path) -> None:
+    executable = shutil.which("specify")
+    if not executable or cli_version() != "1.0.4":
+        raise GovernanceError("companion plans require the reviewed Specify 1.0.4 CLI contract", "COMPANION_CAPABILITY_UNAVAILABLE")
+    expectations = {
+        ("extension", "add"): ("--dev",),
+        ("extension", "remove"): ("--force",),
+        ("preset", "add"): ("--dev", "--priority"),
+        ("preset", "remove"): ("preset_id",),
+        ("workflow", "add"): ("--dev",),
+        ("workflow", "remove"): ("workflow_id",),
+    }
+    for command, required_tokens in expectations.items():
+        result = subprocess.run(
+            [executable, *command, "--help"], cwd=root, text=True, encoding="utf-8", errors="replace",
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+        )
+        output = result.stdout + result.stderr
+        if result.returncode != 0 or any(token not in output for token in required_tokens):
+            raise GovernanceError(
+                f"installed Specify CLI lacks the reviewed {' '.join(command)} contract",
+                "COMPANION_CAPABILITY_UNAVAILABLE",
+            )
+
+
+def companion_allowed_prefixes(root: Path, additional: list[str] | None = None) -> list[str]:
+    status = command_status(root)
+    if status is None:
+        raise GovernanceError("companion installation requires an initialized Spec Kit project", "PROJECT_NOT_INITIALIZED")
+    prefixes = {".specify/", *runtime_reported_prefixes(status)}
+    for value in additional or []:
+        prefixes.add(safe_relative(root, value).as_posix().rstrip("/") + "/")
+    return sorted(prefixes)
+
+
+def companion_external_mutations(root: Path, snapshot: dict[str, Any], install: bool, additional_prefixes: list[str] | None = None) -> list[dict[str, Any]]:
+    require_companion_cli_contract(root)
+    prefixes = companion_allowed_prefixes(root, additional_prefixes)
+    source = Path(snapshot["source_root"]) / COMPANION_ROOT
+    components = list(COMPANION_COMPONENTS if install else reversed(COMPANION_COMPONENTS))
+    result: list[dict[str, Any]] = []
+    for kind, component_id, relative in components:
+        component_source = str((source / relative).resolve())
+        if install:
+            if kind == "extension":
+                argv = ["specify", "extension", "add", component_source, "--dev"]
+                rollback = ["specify", "extension", "remove", component_id, "--force"]
+            elif kind == "preset":
+                argv = ["specify", "preset", "add", "--dev", component_source, "--priority", "5"]
+                rollback = ["specify", "preset", "remove", component_id]
+            else:
+                argv = ["specify", "workflow", "add", component_source, "--dev"]
+                rollback = ["specify", "workflow", "remove", component_id]
+        else:
+            if kind == "extension":
+                argv = ["specify", "extension", "remove", component_id, "--force"]
+                rollback = ["specify", "extension", "add", component_source, "--dev"]
+            elif kind == "preset":
+                argv = ["specify", "preset", "remove", component_id]
+                rollback = ["specify", "preset", "add", "--dev", component_source, "--priority", "5"]
+            else:
+                argv = ["specify", "workflow", "remove", component_id]
+                rollback = ["specify", "workflow", "add", component_source, "--dev"]
+        result.append({
+            "argv": argv,
+            "working_directory": ".",
+            "allowed_path_prefixes": prefixes,
+            "rollback_argv": rollback,
+            "pre_apply_snapshot": [],
+            "postconditions": [],
+            "changed_file_inventory": f"{RUNTIME_DIR}/plans/<plan-id>.changed.json",
+        })
     return result
 
 
@@ -998,10 +1909,25 @@ def validate_apply(root: Path, plan: dict[str, Any], approved_id: str, approved_
     planned_cli_version = plan.get("specify_version")
     if planned_cli_version != cli_version():
         raise GovernanceError("plan input changed: specify_version")
+    if plan.get("capability_inventory_before") != runtime_capability_inventory(root):
+        raise GovernanceError("plan input changed: capability_inventory_before")
+    if plan.get("source_snapshot") is not None:
+        validate_strict_source_snapshot(plan["source_snapshot"])
     for item in plan.get("inputs", []):
         target = root / safe_relative(root, item["path"])
         if not target.is_file() or sha256_file(target) != item["sha256"]:
             raise GovernanceError(f"plan input changed: {item['path']}")
+    validate_review_append_at_apply(root, plan)
+    if plan.get("operation_type") == "plan-upgrade-governance-v2":
+        record_items = [item for item in plan.get("manager_file_mutations", []) if re.fullmatch(r"docs/spec-kit/evidence/migration-[a-f0-9]+\.json", item.get("path", ""))]
+        if len(record_items) != 1:
+            raise GovernanceError("v2 upgrade plan must contain exactly one migration record", "STATE_BROKEN")
+        try:
+            record = json.loads(base64.b64decode(record_items[0]["content_b64"], validate=True))
+        except (binascii.Error, ValueError, TypeError, json.JSONDecodeError) as exc:
+            raise GovernanceError("v2 migration record payload is invalid", "STATE_BROKEN") from exc
+        if migration_binding_sha256(plan, record) != record.get("plan_binding_sha256"):
+            raise GovernanceError("v2 migration plan binding changed", "STATE_BROKEN")
 
 
 def project_inventory(root: Path) -> dict[str, str]:
@@ -1139,13 +2065,15 @@ def run_external_mutations(root: Path, plan: dict[str, Any]) -> list[str]:
         return result.returncode, sorted(path for path in set(before_rollback) | set(after_rollback) if before_rollback.get(path) != after_rollback.get(path))
 
     changed: list[str] = []
+    completed: list[dict[str, Any]] = []
+    transaction_before = project_inventory(root)
     for item in plan.get("external_cli_mutations", []):
         argv = item.get("argv")
         if not isinstance(argv, list) or not argv or any(not isinstance(value, str) or not value for value in argv):
             raise GovernanceError("external mutation argv must be a non-empty string list", "STATE_BROKEN")
         if argv[0] != "specify":
             raise GovernanceError("external mutation executable is not allowlisted", "UNSUPPORTED_INCOMPATIBLE")
-        if "--force" in argv and plan.get("operation_type") != "plan-init":
+        if "--force" in argv and plan.get("operation_type") not in {"plan-init", "plan-remove-governed-companion"}:
             raise GovernanceError("--force is forbidden for this operation", "UNSUPPORTED_INCOMPATIBLE")
         before = project_inventory(root)
         for snapshot in item.get("pre_execution_snapshot", []):
@@ -1163,10 +2091,12 @@ def run_external_mutations(root: Path, plan: dict[str, Any]) -> list[str]:
         changed.extend(changed_now)
         if result.returncode != 0:
             rollback_argv = item.get("rollback_argv")
-            rollback_returncode, rollback_changed = rollback_external(item)
+            rollback_results = [rollback_external(candidate) for candidate in [item, *reversed(completed)]]
+            rollback_returncode = rollback_results[0][0] if rollback_results else None
+            rollback_changed = [path for _code, paths in rollback_results for path in paths]
             report = root / RUNTIME_DIR / "plans" / f"{plan['plan_id']}.external-failure.json"
             report.parent.mkdir(parents=True, exist_ok=True)
-            restored = project_inventory(root) == before
+            restored = project_inventory(root) == transaction_before
             report.write_bytes(canonical_json({"argv": argv, "returncode": result.returncode, "stdout": result.stdout, "stderr": result.stderr, "changed": changed_now, "rollback_argv": rollback_argv, "rollback_returncode": rollback_returncode, "rollback_changed": rollback_changed, "restored": restored}) + b"\n")
             status = "NATIVE_INSTALL_BLOCKED" if restored and plan.get("required_native_key") and plan.get("required_native_key") != "generic" else "RECOVERY_REQUIRED"
             raise GovernanceError(f"external CLI failed; recovery review required: {' '.join(argv)}", status)
@@ -1178,8 +2108,10 @@ def run_external_mutations(root: Path, plan: dict[str, Any]) -> list[str]:
         unexpected = [path for path in changed_now if allowed and not any(within_allowed(path, prefix) for prefix in allowed)]
         if unexpected:
             rollback_argv = item.get("rollback_argv")
-            rollback_returncode, rollback_changed = rollback_external(item)
-            restored = project_inventory(root) == before
+            rollback_results = [rollback_external(candidate) for candidate in [item, *reversed(completed)]]
+            rollback_returncode = rollback_results[0][0] if rollback_results else None
+            rollback_changed = [path for _code, paths in rollback_results for path in paths]
+            restored = project_inventory(root) == transaction_before
             report = root / RUNTIME_DIR / "plans" / f"{plan['plan_id']}.external-scope-failure.json"
             report.parent.mkdir(parents=True, exist_ok=True)
             report.write_bytes(canonical_json({"argv": argv, "unexpected": unexpected, "changed": changed_now, "rollback_argv": rollback_argv, "rollback_returncode": rollback_returncode, "rollback_changed": rollback_changed, "restored": restored}) + b"\n")
@@ -1187,6 +2119,22 @@ def run_external_mutations(root: Path, plan: dict[str, Any]) -> list[str]:
         inventory_path = root / RUNTIME_DIR / "plans" / f"{plan['plan_id']}.changed.json"
         inventory_path.parent.mkdir(parents=True, exist_ok=True)
         inventory_path.write_bytes(canonical_json({"argv": argv, "changed": {path: after.get(path) for path in changed_now}}) + b"\n")
+        completed.append(item)
+    if plan.get("operation_type") in {"plan-install-governed-companion", "plan-remove-governed-companion"}:
+        observed = companion_status(root)
+        expected = "READY" if plan["operation_type"] == "plan-install-governed-companion" else "COMPANION_NOT_INSTALLED"
+        removed_cleanly = expected != "COMPANION_NOT_INSTALLED" or (
+            observed.get("status") == "COMPANION_NOT_INSTALLED"
+            and not observed.get("unavailable")
+            and set(observed.get("missing", [])) == {"extension", "preset", "workflow"}
+        )
+        if observed.get("status") != expected or not removed_cleanly:
+            rollback_results = [rollback_external(candidate) for candidate in reversed(completed)]
+            restored = project_inventory(root) == transaction_before
+            report = root / RUNTIME_DIR / "plans" / f"{plan['plan_id']}.companion-postcondition-failure.json"
+            report.parent.mkdir(parents=True, exist_ok=True)
+            report.write_bytes(canonical_json({"expected": expected, "observed": observed, "rollback_results": rollback_results, "restored": restored}) + b"\n")
+            raise GovernanceError("governed companion postcondition failed", "STATE_BROKEN" if restored else "RECOVERY_REQUIRED")
     return changed
 
 
@@ -1217,7 +2165,10 @@ def apply_manager_mutations(root: Path, plan: dict[str, Any]) -> list[str]:
             if old is not None:
                 backup = backup_dir / (rel.replace("/", "__") + ".bak")
                 backup.write_bytes(old)
-            content = base64.b64decode(item["content_b64"])
+            try:
+                content = base64.b64decode(item["content_b64"], validate=True)
+            except (binascii.Error, ValueError, TypeError) as exc:
+                raise GovernanceError(f"manager mutation has invalid content: {rel}", "STATE_BROKEN") from exc
             target.parent.mkdir(parents=True, exist_ok=True)
             if item.get("action") in MANAGED_ANCHOR_ACTIONS and target.exists():
                 action = item.get("action")
@@ -1229,6 +2180,8 @@ def apply_manager_mutations(root: Path, plan: dict[str, Any]) -> list[str]:
                     content = append_reference_update_check(target.read_bytes(), content)
                 else:
                     content = append_bootstrap_blocks(target.read_bytes(), content)
+            if sha256_bytes(content) != item.get("expected_new_sha256"):
+                raise GovernanceError(f"manager mutation target checksum mismatch: {rel}", "STATE_BROKEN")
             temp = target.with_name(f".{target.name}.{plan['plan_id']}.tmp")
             temp.write_bytes(content)
             with temp.open("r+b") as handle:
@@ -1292,7 +2245,7 @@ def cmd_apply(root: Path, args: argparse.Namespace) -> dict[str, Any]:
 
 
 def create_plan_command(root: Path, operation: str, args: argparse.Namespace) -> dict[str, Any]:
-    if operation != "plan-governance-bootstrap" and operation not in {"plan-upgrade", "plan-rollback", "plan-activate-binding"}:
+    if operation != "plan-governance-bootstrap" and operation not in {"plan-upgrade", "plan-rollback", "plan-activate-binding", "plan-record-artifact-review", "plan-upgrade-governance-v2", "plan-rollback-governance-v2"}:
         compatibility = cli_compatibility(root)
         if compatibility != "READY":
             raise GovernanceError(f"Spec Kit CLI is not eligible for mutation: {compatibility}", compatibility)
@@ -1317,6 +2270,9 @@ def create_plan_command(root: Path, operation: str, args: argparse.Namespace) ->
     anchor_evidence: list[dict[str, Any]] = []
     generic_attestation: dict[str, Any] | None = None
     generic_attestation_rel: str | None = None
+    strict_snapshot: dict[str, Any] | None = None
+    fixed_plan_id: str | None = None
+    companion_external: list[dict[str, Any]] | None = None
     if operation == "plan-onboard":
         if not runtime_id:
             raise GovernanceError("runtime ID is required for onboarding", "IDENTITY_UNKNOWN")
@@ -1394,7 +2350,11 @@ def create_plan_command(root: Path, operation: str, args: argparse.Namespace) ->
         if operation != "plan-onboard" or not getattr(args, "commands_dir", None):
             raise GovernanceError("generic transition requires plan-onboard and an explicit commands directory", "UNSUPPORTED_INCOMPATIBLE")
         safe_relative(root, args.commands_dir)
-    if operation == "plan-governance-bootstrap":
+    review_event: dict[str, Any] | None = None
+    if operation == "plan-record-artifact-review":
+        mutation, review_event = artifact_review_mutation(root, args)
+        mutations = [mutation]
+    elif operation == "plan-governance-bootstrap":
         if not context_anchor:
             raise GovernanceError(
                 "bootstrap requires the current Agent runtime or user to provide the project context anchor",
@@ -1414,6 +2374,29 @@ def create_plan_command(root: Path, operation: str, args: argparse.Namespace) ->
             root, context_anchor, update_reminder_loader().encode("utf-8"),
             "append-managed-update-reminder", protected_anchor=True,
         )]
+    elif operation == "plan-upgrade-governance-v2":
+        strict_snapshot = strict_source_snapshot(getattr(args, "source", None))
+        fixed_plan_id = uuid.uuid4().hex
+        mutations, _migration_rel = governance_v2_upgrade_mutations(root, strict_snapshot, fixed_plan_id)
+    elif operation == "plan-rollback-governance-v2":
+        mutations = governance_v2_rollback_mutations(root, args.migration_record)
+    elif operation in {"plan-install-governed-companion", "plan-remove-governed-companion"}:
+        require_governance_v2(root)
+        strict_snapshot = strict_source_snapshot(getattr(args, "source", None))
+        status = companion_status(root)
+        if operation == "plan-install-governed-companion" and status.get("status") == "READY":
+            raise GovernanceError("governed companion is already installed", "STATE_BROKEN")
+        if operation == "plan-install-governed-companion" and status.get("status") == "COMPANION_CAPABILITY_UNAVAILABLE":
+            raise GovernanceError("installed CLI cannot install the governed companion", "COMPANION_CAPABILITY_UNAVAILABLE")
+        if operation == "plan-remove-governed-companion" and status.get("status") != "READY":
+            raise GovernanceError("governed companion is not fully installed", "COMPANION_NOT_INSTALLED")
+        companion_external = companion_external_mutations(
+            root,
+            strict_snapshot,
+            operation == "plan-install-governed-companion",
+            getattr(args, "allowed_path_prefix", None),
+        )
+        mutations = []
     else:
         mutations = []
     rehearsal = None
@@ -1495,7 +2478,9 @@ def create_plan_command(root: Path, operation: str, args: argparse.Namespace) ->
                 root, context_anchor, marker_loader(documentation_language).encode("utf-8"),
                 "append-managed-loader", protected_anchor=True,
             ))
-    if operation in {"plan-onboard", "plan-init", "plan-extension-install", "plan-default-change", "plan-upgrade", "plan-rollback"} and operation != "plan-governance-bootstrap":
+    if companion_external is not None:
+        external = companion_external
+    elif operation in {"plan-onboard", "plan-init", "plan-extension-install", "plan-default-change", "plan-upgrade", "plan-rollback"} and operation != "plan-governance-bootstrap":
         if operation == "plan-onboard" and not key:
             raise GovernanceError("integration key is required", "KEY_REQUIRED")
         argv: list[str] = []
@@ -1553,7 +2538,7 @@ def create_plan_command(root: Path, operation: str, args: argparse.Namespace) ->
         external = []
     if external:
         inventory = project_inventory(root)
-        for item in external:
+        for index, item in enumerate(external):
             prefixes = item.get("allowed_path_prefixes", [])
             snapshot = [
                 {"path": rel, "sha256": digest}
@@ -1561,7 +2546,7 @@ def create_plan_command(root: Path, operation: str, args: argparse.Namespace) ->
                 if any(rel == prefix.rstrip("/") or rel.startswith(prefix.rstrip("/") + "/") for prefix in prefixes)
             ]
             item["cli_version"] = cli_version()
-            item["pre_execution_snapshot"] = snapshot
+            item["pre_execution_snapshot"] = snapshot if index == 0 else []
             item["expected_status_postconditions"] = ["integration status remains JSON-readable when .specify exists"]
             item["expected_managed_file_postconditions"] = []
             item["failure_recovery_protocol"] = "Preserve runtime evidence; run rollback_argv when supplied; return RECOVERY_REQUIRED if inventory is not restored."
@@ -1573,9 +2558,14 @@ def create_plan_command(root: Path, operation: str, args: argparse.Namespace) ->
         anchor_compatibility_evidence=anchor_evidence,
         rehearsal=rehearsal,
         documentation_language=getattr(args, "documentation_language", None) if operation == "plan-init" else None,
+        plan_id=fixed_plan_id,
+        source_snapshot=strict_snapshot,
     )
     path = save_plan(root, plan)
-    return {"status": "plan-created", "plan_id": plan["plan_id"], "plan_sha256": plan["plan_sha256"], "path": str(path), "operation_type": operation}
+    response = {"status": "plan-created", "plan_id": plan["plan_id"], "plan_sha256": plan["plan_sha256"], "path": str(path), "operation_type": operation}
+    if review_event is not None:
+        response["review_event"] = review_event
+    return response
 
 
 def dispatch(root: Path, args: argparse.Namespace) -> dict[str, Any]:
@@ -1586,7 +2576,23 @@ def dispatch(root: Path, args: argparse.Namespace) -> dict[str, Any]:
         return resolution(root, args.runtime_id, args.display_name, args.integration_key)
     if command == "apply-plan":
         return cmd_apply(root, args)
-    if command in {"plan-governance-bootstrap", "plan-install-update-reminder", "plan-init", "plan-onboard", "plan-extension-install", "plan-default-change", "plan-upgrade", "plan-rollback", "plan-activate-binding"}:
+    if command == "check-companion-status":
+        return companion_status(root)
+    if command == "check-artifact-approval":
+        require_governance_v2(root)
+        locations = feature_locations(root, args.feature_dir)
+        return current_artifact_approval(root, locations, args.artifact_type)
+    if command == "verify-task-package":
+        require_governance_v2(root)
+        return verify_task_package(root, feature_locations(root, args.feature_dir))
+    if command == "audit-feature-readiness":
+        return audit_feature_readiness(root, args.feature_dir)
+    if command in {
+        "plan-governance-bootstrap", "plan-install-update-reminder", "plan-init", "plan-onboard",
+        "plan-extension-install", "plan-default-change", "plan-upgrade", "plan-rollback",
+        "plan-activate-binding", "plan-record-artifact-review", "plan-upgrade-governance-v2",
+        "plan-rollback-governance-v2", "plan-install-governed-companion", "plan-remove-governed-companion",
+    }:
         return create_plan_command(root, command, args)
     if command in {"render", "verify"}:
         package = root / PROJECT_PACKAGE
@@ -1679,8 +2685,32 @@ def parser() -> argparse.ArgumentParser:
         item.add_argument("--loader-failure-evidence")
         item.add_argument("--verification-evidence")
         item.add_argument("--delivery-mode", choices=["loader", "materialized"], default="loader")
+    review = sub.add_parser("plan-record-artifact-review")
+    review.add_argument("--feature-dir", required=True)
+    review.add_argument("--artifact-type", choices=sorted(ARTIFACT_TYPES), required=True)
+    review.add_argument("--decision", choices=sorted(REVIEW_DECISIONS), required=True)
+    review.add_argument("--artifact-path", action="append", default=[])
+    review.add_argument("--review-summary", required=True)
+    review.add_argument("--open-risk", action="append", default=[])
+    review.add_argument("--reviewer", required=True)
+    review.add_argument("--evidence", required=True)
+    review.add_argument("--supersedes-event-id")
+    migration = sub.add_parser("plan-upgrade-governance-v2")
+    migration.add_argument("--source", required=True)
+    rollback_v2 = sub.add_parser("plan-rollback-governance-v2")
+    rollback_v2.add_argument("--migration-record", required=True)
+    for name in ("plan-install-governed-companion", "plan-remove-governed-companion"):
+        item = sub.add_parser(name)
+        item.add_argument("--source", required=True)
+        item.add_argument("--allowed-path-prefix", action="append", default=[])
     apply = sub.add_parser("apply-plan"); apply.add_argument("--plan", required=True); apply.add_argument("--approve-plan-id", required=True); apply.add_argument("--approve-plan-sha256", required=True)
     sub.add_parser("render"); sub.add_parser("verify")
+    sub.add_parser("check-companion-status")
+    for name in ("check-artifact-approval", "verify-task-package", "audit-feature-readiness"):
+        item = sub.add_parser(name)
+        item.add_argument("--feature-dir", required=True)
+        if name == "check-artifact-approval":
+            item.add_argument("--artifact-type", choices=sorted(ARTIFACT_TYPES), required=True)
     update = sub.add_parser("check-update"); update.add_argument("--source")
     return p
 

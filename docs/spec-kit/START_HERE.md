@@ -11,19 +11,23 @@ Before any substantive work:
 
 # Substantive task entry
 
-For substantive engineering, the upstream Spec Kit lifecycle is the execution path:
+Natural-language requests such as “按 Spec 制定方案”, “use Spec Kit”, “start a Feature”, or equivalent substantive design, plan, or implementation intent map to the governed workflow. Begin with Discovery; do not treat the wording as permission to skip directly to specification or plan.
 
-`constitution → specify → clarify → plan → checklist → tasks → analyze → implement → validate → converge`
+For substantive engineering, the governed upstream Spec Kit lifecycle is the execution path:
+
+`discovery → review discovery → specify → clarify → review specification → plan → review plan bundle → checklist → tasks → readiness audit → cold-start review → review task package → analyze → remediation when needed → implement → validate → converge → completion review`
 
 The following rules are mandatory:
 
-1. Before changing application code, inspect the current feature's Spec Kit artifacts and confirm the constitution, specification, plan, and tasks are present and relevant.
+1. Before specification or application-code changes, inspect the brownfield system, create or resume the feature's Discovery ledger, and identify blocking questions and unapproved assumptions.
 2. A conversation, design note, or user message is not a substitute for a Spec Kit artifact.
-3. User approval such as “the plan is acceptable” or “proceed with this approach” approves the discussed direction only. It permits the Agent to advance into upstream Spec Kit artifact alignment; it does not authorize direct code edits that skip that alignment.
-4. If the approved direction is missing from or inconsistent with the current spec, plan, or tasks, use the upstream Spec Kit workflow to update the artifact before implementing it. Do not have this governance package edit `.specify/**` or `specs/**`.
-5. If the user is only discussing options and has not expressed implementation intent, remain in discussion and do not modify application files.
-6. Once the artifacts are aligned and no substantive question remains, implement only the current tasks. If scope, assumptions, risks, or affected components change, pause and return to the upstream Spec Kit artifacts before continuing.
-7. Do not report substantive work as complete until the required `analyze`, `validate`, and `converge` steps have completed and their failures or unresolved items are disclosed.
+3. Stop for explicit user review of `DISCOVERY`, `SPECIFICATION`, `PLAN_BUNDLE`, `TASK_PACKAGE`, and required `REMEDIATION`; bind each decision to paths and current hashes in `REVIEW_LEDGER.json`.
+4. User approval such as “the plan is acceptable” applies only to the named review object. This approval does not authorize direct code edits or approve a later artifact.
+5. If the approved direction is missing from or inconsistent with the current spec, plan, or tasks, use the upstream Spec Kit workflow to update the artifact before implementing it. Do not have this governance package edit `.specify/**` or `specs/**`.
+6. If the user is only discussing options and has not expressed implementation intent, remain in discussion and do not modify application files.
+7. Before implementation, require the task readiness report, isolated cold-start report, and current `TASK_PACKAGE` approval. Each task must be a self-contained, single-result work package with explicit stop conditions.
+8. Once artifacts and review evidence are current, implement only approved tasks. If scope, assumptions, risks, or affected components change, pause, mark dependent approval stale, and return to the appropriate artifact.
+9. Do not report substantive work as complete until required `analyze`, `validate`, `converge`, and completion review have finished and all failures or unresolved items are disclosed.
 
 The governance package does not replace the upstream Spec Kit executor. Its rules guide when the Agent must enter and remain in that workflow.
 

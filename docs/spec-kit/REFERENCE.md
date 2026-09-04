@@ -19,13 +19,21 @@ The global CLI, project `.specify/` infrastructure, installed Agent integration,
 extensions, presets, workflows, events, and project Skills are separate layers.
 Installing or upgrading one layer does not imply that the others changed.
 
-# Project state and lifecycle
+# Project state and governed lifecycle
 
-`.specify/` means an existing Spec Kit project. Resume it, inspect `status --json`, and protect existing files. New substantive work uses:
+`.specify/` means an existing Spec Kit project. Resume it, inspect `status --json`, and protect existing files. New substantive work uses the installed `governed-sdd` companion workflow when project configuration requires it:
 
-`constitution → specify → clarify → plan → checklist → tasks → analyze → implement → validate → converge`
+`discovery → reviewed specification and plan → self-contained tasks → readiness and cold-start review → analyze → implement → validate → converge`
 
 Invocation syntax belongs to the installed integration. Validation and convergence are completion gates.
+
+The companion layer is installed and maintained through supported upstream workflow, extension, and preset commands. It orchestrates existing Spec Kit commands and Reference-owned gates; it is not a second specification engine. The Reference manager may inspect status and plan exact upstream CLI operations, but it must not write `.specify/**`, `specs/**`, or native Agent files directly.
+
+The companion must provide a discovery extension, tiny-model task-detail preset, `governed-sdd` workflow, and readiness adapter compatible with the installed CLI. Verify their status and tested version range from the current project. If any required primitive is unavailable, return `COMPANION_CAPABILITY_UNAVAILABLE`; do not fall back to the bundled shorter workflow.
+
+Human review evidence is stored under `docs/spec-kit/features/<feature-id>/`. `DISCOVERY.md`, `REVIEW_LEDGER.json`, `TASK_READINESS.json`, and `COLD_START_VALIDATION.json` are project-local records and are never portable templates. Approval binds an artifact type to exact project-relative paths and SHA-256 values; live hash drift makes the approval stale.
+
+The readiness validator can check schema fields, safe paths, hashes, IDs, traceability, dependencies, and verification declarations. It cannot prove business correctness or model capability. An isolated cold-start reviewer checks whether a sampled task contains hidden context, decisions, conflicts, or unverifiable outcomes without access to the originating conversation.
 
 The active feature comes from `.specify/feature.json` or the `SPECIFY_FEATURE_DIRECTORY` override, not from the checked-out Git branch. For an existing non-empty project, the upstream adoption command is `specify init --here --force --integration <key>`; protect a reviewable baseline and inspect the generated diff first. The governance manager may invoke that command through its approved external operation, but does not directly edit its output.
 
