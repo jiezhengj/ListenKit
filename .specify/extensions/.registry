@@ -1,0 +1,22 @@
+{
+  "schema_version": "1.0",
+  "extensions": {
+    "governance-discovery": {
+      "version": "2.0.0",
+      "source": "local",
+      "manifest_hash": "sha256:c939896ac967d17354864658801581e0254d5653d2f05efa68c8ef917a8bab1d",
+      "enabled": true,
+      "priority": 10,
+      "registered_commands": {
+        "codex": [
+          "speckit.governance-discovery.discovery",
+          "speckit.governance-discovery.task-readiness",
+          "speckit.governance-discovery.cold-start-review",
+          "speckit.governance-discovery.validate"
+        ]
+      },
+      "registered_skills": [],
+      "installed_at": "2026-09-04T06:07:38.273541+00:00"
+    }
+  }
+}

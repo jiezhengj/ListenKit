@@ -8,6 +8,14 @@
       "source": "bundled",
       "installed_at": "2026-08-20T18:30:27.239240+00:00",
       "updated_at": "2026-08-20T18:30:27.239244+00:00"
+    },
+    "governed-sdd": {
+      "name": "Governed Spec-Driven Development",
+      "version": "2.0.0",
+      "description": "Discovery-first SDD with mandatory human gates, readiness review, and stable overlay anchors.",
+      "source": "/Users/jiezhengj/Documents/Project/SpecKitReference/governance/spec-kit-native/workflows/governed-sdd",
+      "installed_at": "2026-09-04T06:07:38.614306+00:00",
+      "updated_at": "2026-09-04T06:07:38.614471+00:00"
     }
   }
 }
