@@ -8,11 +8,47 @@ Before `plan-init`, the current Agent must ask the user for the BCP-47 language 
 
 # Governance package bootstrap
 
-Extract the portable artifact to `.spec-kit-governance/staging/<plan-id>/`, validate the manifest and SHA-256, and generate `plan-governance-bootstrap` from the staging manager. Bootstrap writes only the committed governance package, manager, manifest, and configuration, plus the Loader at the exact runtime-selected context-anchor path. It does not install the current Agent integration. Apply only after the user authorizes the exact plan ID/hash, then verify with the project manager.
+Extract the portable artifact to `.spec-kit-governance/staging/<plan-id>/`, validate the manifest and SHA-256, and generate `plan-governance-bootstrap` from the staging manager. Bootstrap writes only the committed governance package, manager, manifest, and configuration, plus the Loader at the exact runtime-selected context-anchor path. It does not install the current Agent integration. Apply only after the user authorizes the exact plan ID/hash, then verify with the project manager. This plan/apply protocol governs Reference-owned files; it does not replace the upstream Spec Kit feature workflow.
+
+# Optional CLI update reminder
+
+For an existing `.specify/` project that intentionally does not carry `docs/spec-kit/**` and does not use a global Policy, `plan-install-update-reminder` may append only the separate Reference-owned update reminder to the exact existing context anchor. It requires the installed `specify` CLI, an existing anchor path supplied by the current Agent runtime or user, and an approved plan. It does not create the governance package, copy the manager, or edit `.specify/**`, `specs/**`, or native Agent integration files. The reminder delegates the check to upstream `specify self check`; it is informational and never runs `specify self upgrade` without explicit user approval.
+
+# Daily governed Feature workflow
+
+For substantive feature work, use the installed governed companion and upstream Spec Kit artifacts:
+
+`discovery → REVIEW_REQUESTED → user decision → specify/clarify → specification review → plan bundle review → checklist/tasks → readiness and cold-start review → task package review → analyze → remediation review when needed → implement → validate → converge → completion review`
+
+At each review gate, show the object type, artifact paths, hashes, concise changes, open risks, and permitted next stage. Record `REVIEW_REQUESTED`, `APPROVED`, `CHANGES_REQUESTED`, and `SUPERSEDED` as append-only events. Derive `STALE` whenever a live artifact hash differs from the approved hash or an upstream review object has been superseded. Never rewrite history to change a decision.
+
+Approval phrases such as “the plan is acceptable” authorize only the review object explicitly named in the request. This approval does not authorize direct application-code edits or approve future objects. If the direction is already represented by current approved artifacts, continue from the corresponding handoff; otherwise revise and request review again.
+
+If the user is only discussing alternatives, do not edit application files. If implementation changes the scope or assumptions, pause and update the upstream artifacts before continuing. The Reference package must not edit `.specify/**`, `specs/**`, or native Agent integration files.
+
+## Pause, resume, and fail-closed rules
+
+- `DRAFT` cannot become `APPROVED` without an intervening `REVIEW_REQUESTED` event.
+- `CHANGES_REQUESTED` resumes at the producing stage after revision, not at implementation.
+- A stale specification invalidates dependent plan and task approvals; a stale plan invalidates task approval.
+- A readiness or cold-start failure returns the task package to revision.
+- High-severity analyze findings require a `REMEDIATION` review before artifact or implementation changes continue.
+- A non-interactive run pauses at every human gate. It must not synthesize approval.
+- Missing companion capability, incompatible CLI range, invalid ledger, unsafe path, or hash mismatch blocks progress with a stable diagnostic.
+
+## Tiny-model task-package handoff
+
+Generate each task as one observable result with all detail fields required by `task-readiness-report.schema.json`. Run only deterministic, read-only checks during audit. Sample at least the configured number of representative tasks for cold-start review, including the highest-risk migration, security, or failure-handling work when present. Any sample other than `EXECUTABLE` makes the package ineligible for approval.
+
+Do not equate `EXECUTABLE` with model routing. If a task still demands advanced reasoning, cross-system authority, or human evidence, keep the self-contained package but route it to a capable executor or human owner.
+
+# Completion semantics
+
+`verify` from `tools/spec-kit-governance/governance.py` verifies only the Reference-owned governance package. It does not prove that a business feature is implemented. Feature completion requires the upstream Spec Kit artifacts to agree with the implementation and requires `analyze`, `validate`, and `converge` evidence.
 
 # New projects
 
-When `.specify/` does not exist, first obtain a clear approved key, rehearse with the same CLI/key in a temporary directory, and generate an external mutation scope. A non-empty brownfield may use `specify init --here --force --non-interactive --integration <key>` only through a dedicated `plan-init`; an empty project uses the command without force. After the actual change, compare the scope inventory, status, and managed files; an escape or incomplete recovery returns `RECOVERY_REQUIRED`.
+When `.specify/` does not exist, first obtain a clear approved key, rehearse with the same CLI/key in a temporary directory, and generate an external mutation scope. A non-empty brownfield may use `specify init --here --force --non-interactive --integration <key>` only through a dedicated `plan-init`; upstream `--force` may replace conflicting managed paths, so protect a reviewable baseline and inspect the resulting diff. An empty project uses the command without force. After the actual change, compare the scope inventory, status, and managed files; an escape or incomplete recovery returns `RECOVERY_REQUIRED`.
 
 # Existing projects
 
@@ -34,6 +70,12 @@ Materialized delivery is allowed only when Loader fresh-session validation expli
 
 When the native init target, integration target, managed-file repair, anchor, or parent directory is unwritable; permission is denied; a sandbox blocks the work; or an installation partially fails: preserve and inventory the existing state, return `NATIVE_INSTALL_BLOCKED`, request a writable checkout or permission, and regenerate the plan with the same claimed key after remediation. Do not fall back to generic, switch to another key, or delete existing artifacts.
 
+# Central Reference update check
+
+The central check is session-gated and source-gated: it runs only when the current Agent has loaded the global Policy, the Policy exposes `SPEC_KIT_GOVERNANCE_SOURCE`, and the target carries the committed governance package. Missing Policy, missing source, unavailable source, dirty source, or failed verification is silent and non-blocking during normal project work; no arbitrary directory scan is allowed.
+
+When the check reports `UPDATE_AVAILABLE`, present the source revision and changed paths to the user. Do not modify the project until the user approves the exact Reference synchronization plan. `REVIEW_REQUIRED` requires human review before any Policy-related deployment.
+
 # Upgrade and rollback
 
-Read the fixed release index from the central source in read-only mode. First generate `plan-upgrade`, review Policy, Reference, manager, adapter, manifest, and capability inventory, then apply it. The inventory before and after the upgrade must be equivalent unless every change has an approved `REPLACE`. Rollback must not uninstall integrations or delete user work; incomplete failure recovery returns `RECOVERY_REQUIRED`.
+Read the clean central Reference checkout in read-only mode and compare its Git revision with the target manifest. First generate `plan-upgrade --source <central-or-staged-source>`, review Policy, Reference, manager, anchor, adapter, manifest, and capability inventory, then apply it. The inventory before and after the upgrade must be equivalent unless every change has an approved `REPLACE`. Rollback must not uninstall integrations or delete user work; incomplete failure recovery returns `RECOVERY_REQUIRED`. Reference synchronization must not modify `.specify/**`, `specs/**`, or native Agent-generated files.

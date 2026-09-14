@@ -11,7 +11,12 @@ APP_DIR="${BUILD_DIR}/${APP_NAME}.app"
 CONTENTS_DIR="${APP_DIR}/Contents"
 MACOS_DIR="${CONTENTS_DIR}/MacOS"
 EXECUTABLE_PATH="${MACOS_DIR}/${APP_NAME}"
-MODULE_CACHE_DIR="${ROOT_DIR}/.build/module-cache"
+MODULE_CACHE_DIR="${LISTENKIT_SWIFT_MODULE_CACHE_DIR:-${ROOT_DIR}/.build/module-cache}"
+
+if [[ "${1:-}" == "--clean" ]]; then
+  rm -rf "${ROOT_DIR}/.build"
+  exit 0
+fi
 
 needs_rebuild() {
   if [[ ! -x "${EXECUTABLE_PATH}" ]]; then

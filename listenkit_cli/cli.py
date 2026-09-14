@@ -9,6 +9,7 @@ from typing import Sequence
 
 from .asr_device import ALLOWED_COMPUTE_TYPES
 from .agent_install import install_instructions, instruction_source
+from .clean import clean_workspace
 from .doctor import doctor_lines
 from .errors import ListenKitError
 from .execution_report import (
@@ -121,6 +122,27 @@ def build_parser() -> argparse.ArgumentParser:
     install.add_argument("--force", action="store_true")
     install.add_argument("--dry-run", action="store_true")
     install.add_argument("--print", dest="print_only", action="store_true")
+
+    clean_parser = subparsers.add_parser(
+        "clean",
+        help="Clean temporary build artifacts, bytecode caches, and optional runtime caches.",
+    )
+    clean_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print items that would be removed without deleting them.",
+    )
+    clean_parser.add_argument(
+        "--runtime",
+        action="store_true",
+        help="Also clean the managed ListenKit Python venv runtime cache.",
+    )
+    clean_parser.add_argument(
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="Print each file and directory that is removed.",
+    )
 
     subparsers.add_parser("doctor", help="Report platform, dependency, and runtime status.")
     return parser
@@ -288,6 +310,15 @@ def _dispatch(
             print(f"Target: {target}")
         else:
             print(target)
+        return 0
+    if args.command == "clean":
+        repo_root = Path(__file__).resolve().parents[1]
+        clean_workspace(
+            repo_root,
+            clean_runtime=args.runtime,
+            dry_run=args.dry_run,
+            verbose=args.verbose,
+        )
         return 0
     if args.command == "doctor":
         print("\n".join(doctor_lines()))
